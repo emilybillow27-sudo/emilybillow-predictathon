@@ -1,6 +1,28 @@
-# Ignore all raw and processed data
+# -------------------------
+# macOS junk
+# -------------------------
+.DS_Store
+
+# -------------------------
+# Python cache
+# -------------------------
+__pycache__/
+*.pyc
+
+# -------------------------
+# Snakemake internals
+# -------------------------
+.snakemake/
+*.snakemake.log
+
+# -------------------------
+# Raw and processed data
+# (lives outside repo or too large)
+# -------------------------
 data/raw/
-data/processed/
+data/processed/*.npz
+data/processed/*.npy
+data/processed/*.rds
 
 # Ignore all CSVs by default
 *.csv
@@ -9,7 +31,9 @@ data/processed/
 !data/*.md
 !data/*.txt
 
-# Ignore large binary files
+# -------------------------
+# Large binary files
+# -------------------------
 *.npz
 *.npy
 *.vcf
@@ -17,29 +41,7 @@ data/processed/
 *.gz
 *.zip
 
-# Ignore Python cache
-__pycache__/
-*.pyc
-
-# macOS junk
-.DS_Store
-
-# Snakemake internals
-.snakemake/
-*.snakemake.log
-
-# Raw data (lives in sibling directory)
-data/raw/
-*/raw/
-
-# Large processed files you don't want tracked
-data/processed/*.npz
-data/processed/*.npy
-data/processed/*.rds
-
-# Submission outputs (optional)
+# -------------------------
+# Submission outputs
+# -------------------------
 submission_output/
-
-# Python cache
-__pycache__/
-*.pyc
