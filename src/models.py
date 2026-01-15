@@ -4,7 +4,7 @@ from sklearn.model_selection import KFold
 
 
 # ------------------------------------------------------------
-# 0. Build a simple VanRaden-like GRM from genotype matrix
+# 0. Build a stable VanRaden-like GRM from genotype matrix
 # ------------------------------------------------------------
 
 def build_grm_from_geno(geno_df):
@@ -28,13 +28,19 @@ def build_grm_from_geno(geno_df):
     if inds[0].size > 0:
         X[inds] = np.take(col_means, inds[1])
 
+    # Remove monomorphic markers (zero variance)
+    std = X.std(axis=0)
+    keep = std > 0
+    X = X[:, keep]
+
+    if X.shape[1] == 0:
+        raise ValueError("All markers are monomorphic after filtering.")
+
     # Center markers by column mean
     X_centered = X - X.mean(axis=0, keepdims=True)
 
     # Number of markers
     m = X_centered.shape[1]
-    if m == 0:
-        raise ValueError("No marker columns found in geno_df to build GRM.")
 
     # VanRaden-like GRM: G = X_centered X_centered' / m
     G = (X_centered @ X_centered.T) / m
@@ -43,13 +49,13 @@ def build_grm_from_geno(geno_df):
 
 
 # ------------------------------------------------------------
-# 1. Fit GBLUP model using VanRaden GRM
+# 1. Fit GBLUP model using stabilized mixed model equation
 # ------------------------------------------------------------
 
 def fit_model(train_pheno, geno, env, G, model_type="me_gblup"):
     """
     Fit a GBLUP model using the GRM and phenotype vector.
-    Uses the correct mixed model equation:
+    Uses:
         u = (G + λI)^(-1) y
     """
 
@@ -84,19 +90,22 @@ def fit_model(train_pheno, geno, env, G, model_type="me_gblup"):
     idx = [geno_lines.index(l) for l in train_lines]
     G_sub = G[np.ix_(idx, idx)]
 
-    # Add ridge penalty (λ)
-    lambda_ = 1e-3
+    # Ridge penalty (λ) — increased for stability
+    lambda_ = 1.0
     A = G_sub + lambda_ * np.eye(len(G_sub))
 
-    # Solve for breeding values
-    u = np.linalg.solve(A, y)
+    # Solve for breeding values (safe solve)
+    try:
+        u = np.linalg.solve(A, y)
+    except np.linalg.LinAlgError:
+        u = np.linalg.lstsq(A, y, rcond=None)[0]
 
     return {
         "train_lines": train_lines,
         "u": u,
         "geno_lines": geno_lines,
         "G_full": G,
-        "y_mean": y_mean,   # <-- NEW: store phenotype mean
+        "y_mean": y_mean,
     }
 
 
@@ -114,7 +123,7 @@ def predict_for_trial(model, focal_trial, test_accessions, geno, env, G, model_t
     u = model["u"]
     geno_lines = model["geno_lines"]
     G_full = model["G_full"]
-    y_mean = model["y_mean"]   # <-- NEW: retrieve phenotype mean
+    y_mean = model["y_mean"]
 
     preds = []
     for acc in test_accessions:
@@ -125,7 +134,6 @@ def predict_for_trial(model, focal_trial, test_accessions, geno, env, G, model_t
         i = geno_lines.index(acc)
         g_vec = G_full[i, [geno_lines.index(l) for l in train_lines]]
 
-        # Add phenotype mean back to get predictions on original scale
         pred = g_vec @ u + y_mean
         preds.append(pred)
 
@@ -136,7 +144,7 @@ def predict_for_trial(model, focal_trial, test_accessions, geno, env, G, model_t
 
 
 # ------------------------------------------------------------
-# 3. CV1 cross-validation
+# 3. CV1 cross-validation with diagnostics
 # ------------------------------------------------------------
 
 def cross_validate_model(train_pheno, geno, env, G, model_type="me_gblup", n_folds=5):
@@ -178,6 +186,10 @@ def cross_validate_model(train_pheno, geno, env, G, model_type="me_gblup", n_fol
             G=G,
             model_type=model_type,
         )
+
+        # Diagnostics: variance comparison
+        print(f"[Fold {fold}] Pred variance:", preds["pred"].var())
+        print(f"[Fold {fold}] Value variance:", pheno_test[pheno_col].var())
 
         merged = pheno_test[["germplasmName", pheno_col]].merge(
             preds, on="germplasmName", how="inner"

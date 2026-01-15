@@ -18,17 +18,24 @@ def write_submission_files(
     cv_dir = os.path.join(output_root, trial_name, cv_type)
     os.makedirs(cv_dir, exist_ok=True)
 
-    # Accessions
-    pd.DataFrame({"accession": train_accessions}).drop_duplicates().to_csv(
+    # Sort predictions for consistency
+    preds_df = preds_df.sort_values("germplasmName").reset_index(drop=True)
+
+    # Warn if missing predictions
+    if preds_df["pred"].isna().any():
+        print(f"Warning: {preds_df['pred'].isna().sum()} missing predictions in {trial_name} {cv_type}")
+
+    # Accessions file
+    pd.DataFrame({"germplasmName": train_accessions}).drop_duplicates().to_csv(
         os.path.join(cv_dir, f"{cv_type}accessions.csv"), index=False
     )
 
-    # Trials
+    # Trials file
     pd.DataFrame({"trial": train_trials}).drop_duplicates().to_csv(
         os.path.join(cv_dir, f"{cv_type}trials.csv"), index=False
     )
 
-    # Predictions
+    # Predictions file
     preds_df.to_csv(
         os.path.join(cv_dir, f"{cv_type}predictions.csv"), index=False
     )

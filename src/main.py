@@ -36,7 +36,6 @@ def main():
     data_dir = os.path.join(ROOT, "data", "processed")
     output_root = os.path.join(ROOT, "submission_output")
 
-    # New pipeline outputs
     pheno_path = os.path.join(data_dir, "preprocessed_final.csv")
     geno_path = os.path.join(data_dir, "geno_merged_raw.csv")
 
@@ -54,7 +53,6 @@ def main():
     # --------------------------------------------------------------
     # Step 1b: Convert long-format phenotype → modeling-ready format
     # --------------------------------------------------------------
-    # Expecting columns: germplasmName, trial, trait_name, value
     if {"germplasmName", "value"}.issubset(pheno.columns):
         pheno = (
             pheno.groupby("germplasmName")["value"]
@@ -70,8 +68,10 @@ def main():
     before = len(pheno)
     pheno = pheno[pheno["germplasmName"].isin(geno_lines)].reset_index(drop=True)
     after = len(pheno)
-    dropped = before - after
-    print(f"✓ Filtered phenotype to genotyped lines: kept {after}, dropped {dropped}")
+    print(f"✓ Filtered phenotype to genotyped lines: kept {after}, dropped {before - after}")
+
+    if after == 0:
+        raise ValueError("No phenotype lines overlap with genotype lines.")
 
     # --------------------------------------------------------------
     # Step 2: Build GRM
@@ -80,9 +80,12 @@ def main():
     G, geno_lines_ordered = build_grm_from_geno(geno)
     print(f"✓ GRM shape: {G.shape}")
 
-    # No environment descriptors for now
-    env = None
+    # Diagnostic: GRM diagonal range
+    print("GRM diag range:",
+          float(G.diagonal().min()),
+          float(G.diagonal().max()))
 
+    env = None
     MODEL_TYPE = "me_gblup"
 
     # --------------------------------------------------------------
@@ -108,11 +111,11 @@ def main():
         n_folds=5,
     )
 
-    if "value" in cv_results.columns and "pred" in cv_results.columns:
+    if {"value", "pred"}.issubset(cv_results.columns):
         corr = cv_results["value"].corr(cv_results["pred"])
         print(f"CV1 accuracy (Pearson r): {corr:.3f}")
     else:
-        print("Warning: cv_results missing 'value' or 'pred' columns; skipping accuracy calculation.")
+        print("Warning: cv_results missing required columns.")
 
     cv_out = os.path.join(output_root, "cv1_results.csv")
     cv_results.to_csv(cv_out, index=False)
