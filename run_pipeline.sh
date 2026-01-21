@@ -11,11 +11,14 @@ echo "======================================"
 # ---------------------------------------------------------
 if [[ "${1:-}" == "--clean" ]]; then
     echo "Cleaning workspace..."
-    rm -rf data/processed/*
-    rm -rf submission_output/*
-    rm -rf .snakemake
+
+    rm -f data/processed/modeling_matrix.csv
+    rm -f data/processed/geno_merged_raw.csv
+    rm -f data/processed/train_pheno_overlap.csv
+    rm -rf submission_output
+
     echo "Clean-all complete."
-    echo "--------------------------------------"
+    exit 0
 fi
 
 # ---------------------------------------------------------
@@ -28,9 +31,8 @@ echo "--------------------------------------"
 # ---------------------------------------------------------
 # Step 2: Build all submission files
 # ---------------------------------------------------------
-echo "Building final submission outputs..."
-snakemake all -p -j1
-echo "--------------------------------------"
+echo "Running full pipeline..."
+snakemake -p -j1
 
 echo "======================================"
 echo " Pipeline complete!"

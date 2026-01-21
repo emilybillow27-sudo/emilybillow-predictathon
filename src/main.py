@@ -15,7 +15,7 @@ from submission import write_submission_files
 
 # Challenge trials for Predictathon
 FOCAL_TRIALS = [
-    "AWY1_DVPWA_2024",
+    "AWY1_DCPWA_2024",
     "TCAP_2025_MANKS",
     "25_Big6_SVREC_SVREC",
     "OHRWW_2025_SPO",
@@ -80,7 +80,6 @@ def main():
     G, geno_lines_ordered = build_grm_from_geno(geno)
     print(f"✓ GRM shape: {G.shape}")
 
-    # Diagnostic: GRM diagonal range
     print("GRM diag range:",
           float(G.diagonal().min()),
           float(G.diagonal().max()))
@@ -139,17 +138,27 @@ def main():
     # --------------------------------------------------------------
     print("\n=== Predicting for challenge trials ===")
 
-    all_genotyped = geno["germplasmName"].unique().tolist()
+    accession_list_dir = os.path.join(ROOT, "data", "raw", "accession_lists")
 
     for trial in FOCAL_TRIALS:
+        trial_txt = os.path.join(accession_list_dir, f"{trial}.txt")
+
+        if not os.path.exists(trial_txt):
+            raise FileNotFoundError(f"Missing accession list for trial: {trial_txt}")
+
+        with open(trial_txt, "r") as f:
+            trial_accessions = [line.strip() for line in f if line.strip()]
+
+        print(f"\nLoaded {len(trial_accessions)} accessions for trial {trial}")
+
         for cv_type in ["CV0", "CV00"]:
             print(f"\n--- {trial} / {cv_type} ---")
-            print(f"  Predicting for {len(all_genotyped)} genotyped accessions.")
+            print(f"  Predicting for {len(trial_accessions)} accessions tested in this trial.")
 
             preds_df = predict_for_trial(
                 model=model,
                 focal_trial=trial,
-                test_accessions=all_genotyped,
+                test_accessions=trial_accessions,
                 geno=geno,
                 env=env,
                 G=G,

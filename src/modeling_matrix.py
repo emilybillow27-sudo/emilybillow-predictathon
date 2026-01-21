@@ -3,13 +3,13 @@
 modeling_matrix.py
 
 Build a modeling-ready phenotype matrix from a large CSV file.
-Includes:
+Now includes:
   - chunk-safe missingness computation
-  - trait-name standardization (traits only, not metadata)
-  - metadata renaming to match CV code
+  - trait-name standardization
+  - metadata renaming + automatic metadata merge
   - trait filtering by missingness
   - final matrix assembly
-  - renaming the single trait column to 'value' (Option A)
+  - renaming the single trait column to 'value'
 
 Designed for multi-GB phenotype files.
 """
@@ -51,9 +51,35 @@ METADATA_COLS = [
     "entryType"
 ]
 
+# Additional metadata fields from metadata.csv
+METADATA_COLS.extend([
+    "trialType",
+    "breedingProgramName",
+    "breedingProgramDescription",
+    "breedingProgramDbId",
+    "studyDesign",
+    "plotWidth",
+    "plotLength",
+    "plantsPerPlot",
+    "numberBlocks",
+    "numberReps",
+    "managementFactors",
+    "fieldSize",
+    "folderDbId",
+    "folderName",
+    "folderDescription",
+    "season_length"
+])
+
+
 # Raw → standardized metadata renames
 METADATA_RENAMES = {
     "studyname": "studyName",
+    "study_name": "studyName",
+    "trial": "studyName",          # phenotype file fix
+    "trialname": "studyName",
+    "trial_name": "studyName",
+
     "studyyear": "studyYear",
     "locationname": "locationName",
     "germplasmname": "germplasmName",
@@ -70,10 +96,7 @@ METADATA_RENAMES = {
 # ============================================================
 
 def standardize_trait_name(name):
-    """
-    Convert complex trait names into clean, machine-friendly identifiers.
-    Metadata columns are handled separately and never standardized.
-    """
+    """Convert complex trait names into clean, machine-friendly identifiers."""
     name = name.lower()
     name = name.replace(" - ", "_")
     name = name.replace(" ", "_")
@@ -91,10 +114,7 @@ def standardize_trait_name(name):
 # ============================================================
 
 def compute_missingness(path, chunksize=200000):
-    """
-    Compute missingness per column in a streaming, memory-safe way.
-    Returns: dict {column_name: missing_fraction}
-    """
+    """Compute missingness per column in a streaming, memory-safe way."""
     total_counts = None
     missing_counts = None
 
@@ -105,6 +125,10 @@ def compute_missingness(path, chunksize=200000):
         chunk.columns = [
             METADATA_RENAMES.get(c.lower(), c) for c in chunk.columns
         ]
+
+        # Fix phenotype 'trial' column
+        if "trial" in chunk.columns:
+            chunk.rename(columns={"trial": "studyName"}, inplace=True)
 
         if total_counts is None:
             total_counts = chunk.notna().count()
@@ -123,14 +147,22 @@ def compute_missingness(path, chunksize=200000):
 
 def build_modeling_matrix(
     path,
+    metadata_path,
     chunksize=200000,
     missingness_threshold=0.5,
     standardize_traits=True
 ):
-    """
-    Build a modeling-ready phenotype matrix from a large CSV file.
-    Chunk-safe, memory-safe, modular.
-    """
+    """Build a modeling-ready phenotype matrix from a large CSV file."""
+
+    # ------------------------------------------------------------
+    # Load metadata once
+    # ------------------------------------------------------------
+    metadata_df = pd.read_csv(metadata_path)
+
+    # Standardize metadata column names
+    metadata_df.columns = [
+        METADATA_RENAMES.get(c.lower(), c) for c in metadata_df.columns
+    ]
 
     # ------------------------------------------------------------
     # 1. Compute missingness
@@ -139,7 +171,6 @@ def build_modeling_matrix(
 
     # ------------------------------------------------------------
     # 2. Filter traits by missingness threshold
-    #    (metadata columns are ALWAYS kept)
     # ------------------------------------------------------------
     traits_to_keep = [
         col for col, miss in missing.items()
@@ -163,8 +194,40 @@ def build_modeling_matrix(
             METADATA_RENAMES.get(c.lower(), c) for c in chunk.columns
         ]
 
+        # Fix phenotype 'trial' column
+        if "trial" in chunk.columns:
+            chunk.rename(columns={"trial": "studyName"}, inplace=True)
+
+        # Guardrail
+        if "studyName" not in chunk.columns:
+            raise KeyError(
+                f"'studyName' missing in phenotype chunk. Columns: {chunk.columns.tolist()}"
+            )
+
         # Keep only selected columns
         chunk = chunk[[c for c in chunk.columns if c in traits_to_keep]]
+
+        # Merge metadata by studyName
+        chunk = chunk.merge(
+            metadata_df,
+            on="studyName",
+            how="left",
+            validate="many_to_one"
+        )
+
+        # Optional: engineer modeling-ready features
+        if "plantingDate" in chunk.columns:
+            chunk["plantingDate"] = pd.to_datetime(chunk["plantingDate"], errors="coerce")
+        if "harvestDate" in chunk.columns:
+            chunk["harvestDate"] = pd.to_datetime(chunk["harvestDate"], errors="coerce")
+
+        if "plantingDate" in chunk.columns and "harvestDate" in chunk.columns:
+            chunk["season_length"] = (
+                chunk["harvestDate"] - chunk["plantingDate"]
+            ).dt.days
+
+        if "studyYear" in chunk.columns:
+            chunk["studyYear"] = pd.to_numeric(chunk["studyYear"], errors="coerce")
 
         # Standardize trait names (NOT metadata)
         if standardize_traits:
@@ -184,8 +247,12 @@ def build_modeling_matrix(
     final_df = pd.concat(cleaned_chunks, ignore_index=True)
 
     # ------------------------------------------------------------
-    # 5. Rename the single trait column to 'value' (Option A)
+    # 5. Rename the single trait column to 'value'
     # ------------------------------------------------------------
+   # Drop trait_name (identifier, not a numeric trait column)
+    if "trait_name" in final_df.columns:
+        final_df.drop(columns=["trait_name"], inplace=True)
+
     trait_cols = [c for c in final_df.columns if c not in METADATA_COLS]
 
     if len(trait_cols) != 1:
@@ -208,15 +275,16 @@ def build_modeling_matrix(
 if __name__ == "__main__":
     print("\n=== Running modeling_matrix.py as a script ===")
 
-    # Resolve repo root
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     input_path = os.path.join(ROOT, "data", "processed", "preprocessed_final.csv")
+    metadata_path = os.path.join(ROOT, "data", "raw", "metadata.csv")
     output_path = os.path.join(ROOT, "data", "processed", "modeling_matrix.csv")
 
     print(f"Building modeling matrix from: {input_path}")
 
     df = build_modeling_matrix(
         path=input_path,
+        metadata_path=metadata_path,
         chunksize=200000,
         missingness_threshold=0.5,
         standardize_traits=True
