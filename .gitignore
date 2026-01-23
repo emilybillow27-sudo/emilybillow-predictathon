@@ -16,20 +16,32 @@ __pycache__/
 *.snakemake.log
 
 # -------------------------
-# Raw and processed data
-# (lives outside repo or too large)
+# Raw data
 # -------------------------
-data/raw/
+# Ignore everything in data/raw except metadata + accession lists
+data/raw/*
+!data/raw/metadata.csv
+!data/raw/accession_lists/
+!data/raw/accession_lists/*.txt
+
+# -------------------------
+# Processed data
+# -------------------------
 data/processed/*.npz
 data/processed/*.npy
 data/processed/*.rds
 
+# -------------------------
 # Ignore all CSVs by default
+# -------------------------
 *.csv
 
 # Allow small metadata files
 !data/*.md
 !data/*.txt
+
+# Allow metadata.csv specifically
+!data/raw/metadata.csv
 
 # -------------------------
 # Large binary files
