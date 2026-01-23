@@ -11,22 +11,18 @@ def _get(endpoint, params=None):
     r.raise_for_status()
     return r.json()
 
-# -----------------------------
 # Germplasm
-# -----------------------------
 def get_germplasm_by_name(names):
-    """Fetch germplasm metadata for a list of accession names."""
+    """Fetch germplasm metadata for accession names."""
     out = []
     for name in names:
         resp = _get("germplasm-search", params={"germplasmName": name})
         out.extend(resp.get("result", {}).get("data", []))
     return pd.DataFrame(out)
 
-# -----------------------------
 # Studies / Trials
-# -----------------------------
 def get_study_metadata(studyDbId):
-    """Fetch enriched trial metadata including new T3 fields."""
+    """Fetch trial metadata."""
     resp = _get(f"studies/{studyDbId}")
     result = resp.get("result", {})
     meta = {
@@ -44,20 +40,16 @@ def get_study_metadata(studyDbId):
     }
     return pd.DataFrame([meta])
 
-# -----------------------------
-# Observations (phenotypes)
-# -----------------------------
+# Observations
 def get_observations(studyDbId):
-    """Fetch plot-level phenotypes and metadata."""
+    """Fetch plot-level phenotypes."""
     resp = _get("observations-search", params={"studyDbId": studyDbId})
     data = resp.get("result", {}).get("data", [])
     return pd.DataFrame(data)
 
-# -----------------------------
-# Variables (traits)
-# -----------------------------
+# Variables
 def get_variables():
-    """Fetch trait metadata including abbreviations."""
+    """Fetch trait metadata."""
     resp = _get("variables")
     vars = resp.get("result", {}).get("data", [])
     rows = []
@@ -71,11 +63,8 @@ def get_variables():
         })
     return pd.DataFrame(rows)
 
-# -----------------------------
 # Lists
-# -----------------------------
 def get_list_items(listDbId):
-    """Fetch items from a T3 list (accessions, trials, etc.)."""
+    """Fetch items from a T3 list."""
     resp = _get(f"lists/{listDbId}")
     return resp.get("result", {}).get("data", [])
-

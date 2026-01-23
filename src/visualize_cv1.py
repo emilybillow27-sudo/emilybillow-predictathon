@@ -4,26 +4,20 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import pearsonr
 
-# --------------------------------------------------------------
-# Resolve repo root and paths
-# --------------------------------------------------------------
+# Paths
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 cv1_path = os.path.join(ROOT, "submission_output", "cv1_results.csv")
 scatter_out = os.path.join(ROOT, "submission_output", "cv1_scatter.png")
 foldwise_out = os.path.join(ROOT, "submission_output", "cv1_foldwise_accuracy.png")
 
-# --------------------------------------------------------------
-# Load CV1 results
-# --------------------------------------------------------------
+# Load results
 df = pd.read_csv(cv1_path)
 
-# Compute Pearson correlation
+# Pearson r
 r, p = pearsonr(df["value"], df["pred"])
 print(f"CV1 Pearson r = {r:.3f}")
 
-# --------------------------------------------------------------
-# Scatterplot: Observed vs Predicted
-# --------------------------------------------------------------
+# Scatterplot
 plt.figure(figsize=(8, 6))
 sns.scatterplot(
     data=df,
@@ -35,7 +29,6 @@ sns.scatterplot(
     s=40
 )
 
-# 1:1 line
 min_val = min(df["value"].min(), df["pred"].min())
 max_val = max(df["value"].max(), df["pred"].max())
 plt.plot([min_val, max_val], [min_val, max_val], "k--", linewidth=1)
@@ -49,9 +42,7 @@ plt.tight_layout()
 plt.savefig(scatter_out, dpi=300)
 plt.close()
 
-# --------------------------------------------------------------
-# Fold-wise accuracy bar plot
-# --------------------------------------------------------------
+# Fold-wise accuracy
 fold_r = df.groupby("fold").apply(lambda g: pearsonr(g["value"], g["pred"])[0])
 
 plt.figure(figsize=(6, 4))

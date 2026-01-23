@@ -12,8 +12,7 @@ from models import (
 )
 from submission import write_submission_files
 
-
-# Challenge trials for Predictathon
+# Predictathon challenge trials
 FOCAL_TRIALS = [
     "AWY1_DCPWA_2024",
     "TCAP_2025_MANKS",
@@ -29,9 +28,7 @@ FOCAL_TRIALS = [
 
 def main():
 
-    # --------------------------------------------------------------
-    # Resolve repo root so all paths are stable
-    # --------------------------------------------------------------
+    # Paths
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = os.path.join(ROOT, "data", "processed")
     output_root = os.path.join(ROOT, "submission_output")
@@ -39,20 +36,14 @@ def main():
     pheno_path = os.path.join(data_dir, "preprocessed_final.csv")
     geno_path = os.path.join(data_dir, "geno_merged_raw.csv")
 
-    # --------------------------------------------------------------
-    # Step 1: Load processed data
-    # --------------------------------------------------------------
+    # Load data
     print("\n=== Loading processed data ===")
-
     pheno = pd.read_csv(pheno_path)
     geno = pd.read_csv(geno_path)
-
     print(f"✓ Raw phenotype rows: {len(pheno)}")
     print(f"✓ Genotype matrix shape: {geno.shape}")
 
-    # --------------------------------------------------------------
-    # Step 1b: Convert long-format phenotype → modeling-ready format
-    # --------------------------------------------------------------
+    # Collapse long-format phenotype if needed
     if {"germplasmName", "value"}.issubset(pheno.columns):
         pheno = (
             pheno.groupby("germplasmName")["value"]
@@ -61,10 +52,8 @@ def main():
         )
         print(f"✓ Collapsed phenotype to {len(pheno)} unique lines")
 
-    # --------------------------------------------------------------
-    # Step 1c: Restrict phenotype to lines with genotypes
-    # --------------------------------------------------------------
-    geno_lines = set(geno["germplasmName"].tolist())
+    # Keep only genotyped lines
+    geno_lines = set(geno["germplasmName"])
     before = len(pheno)
     pheno = pheno[pheno["germplasmName"].isin(geno_lines)].reset_index(drop=True)
     after = len(pheno)
@@ -73,13 +62,10 @@ def main():
     if after == 0:
         raise ValueError("No phenotype lines overlap with genotype lines.")
 
-    # --------------------------------------------------------------
-    # Step 2: Build GRM
-    # --------------------------------------------------------------
-    print("\n=== Building genomic relationship matrix (GRM) ===")
+    # Build GRM
+    print("\n=== Building GRM ===")
     G, geno_lines_ordered = build_grm_from_geno(geno)
     print(f"✓ GRM shape: {G.shape}")
-
     print("GRM diag range:",
           float(G.diagonal().min()),
           float(G.diagonal().max()))
@@ -87,20 +73,14 @@ def main():
     env = None
     MODEL_TYPE = "me_gblup"
 
-    # --------------------------------------------------------------
-    # Step 3: Ensure submission folder structure exists
-    # --------------------------------------------------------------
+    # Create submission folders
     print("\n=== Ensuring submission folder structure ===")
-
     for trial in FOCAL_TRIALS:
         for cv_type in ["CV0", "CV00"]:
             os.makedirs(os.path.join(output_root, trial, cv_type), exist_ok=True)
 
-    # --------------------------------------------------------------
-    # Step 4: Run CV1 cross-validation
-    # --------------------------------------------------------------
+    # CV1
     print("\n=== Running CV1 cross-validation ===")
-
     cv_results = cross_validate_model(
         train_pheno=pheno,
         geno=geno,
@@ -120,11 +100,8 @@ def main():
     cv_results.to_csv(cv_out, index=False)
     print(f"✓ Saved CV1 results to {cv_out}")
 
-    # --------------------------------------------------------------
-    # Step 5: Fit final model on all training data
-    # --------------------------------------------------------------
-    print("\n=== Fitting final model on all training data ===")
-
+    # Fit final model
+    print("\n=== Fitting final model ===")
     model = fit_model(
         train_pheno=pheno,
         geno=geno,
@@ -133,27 +110,23 @@ def main():
         model_type=MODEL_TYPE,
     )
 
-    # --------------------------------------------------------------
-    # Step 6: Predict for challenge trials
-    # --------------------------------------------------------------
+    # Predict for challenge trials
     print("\n=== Predicting for challenge trials ===")
-
     accession_list_dir = os.path.join(ROOT, "data", "raw", "accession_lists")
 
     for trial in FOCAL_TRIALS:
         trial_txt = os.path.join(accession_list_dir, f"{trial}.txt")
-
         if not os.path.exists(trial_txt):
-            raise FileNotFoundError(f"Missing accession list for trial: {trial_txt}")
+            raise FileNotFoundError(f"Missing accession list: {trial_txt}")
 
         with open(trial_txt, "r") as f:
             trial_accessions = [line.strip() for line in f if line.strip()]
 
-        print(f"\nLoaded {len(trial_accessions)} accessions for trial {trial}")
+        print(f"\nLoaded {len(trial_accessions)} accessions for {trial}")
 
         for cv_type in ["CV0", "CV00"]:
             print(f"\n--- {trial} / {cv_type} ---")
-            print(f"  Predicting for {len(trial_accessions)} accessions tested in this trial.")
+            print(f"  Predicting for {len(trial_accessions)} accessions")
 
             preds_df = predict_for_trial(
                 model=model,

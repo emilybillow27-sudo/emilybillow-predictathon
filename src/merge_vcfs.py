@@ -4,10 +4,10 @@ import numpy as np
 import glob
 import os
 
-# Path to your real genotype directory
+# Genotype directory
 RAW_DIR = "/Users/emilybillow/Desktop/emilybillow_data/raw"
 
-# Detect ALL VCFs in that folder (both .vcf and .vcf.gz)
+# Find all VCFs
 vcf_paths = sorted(
     glob.glob(os.path.join(RAW_DIR, "*.vcf")) +
     glob.glob(os.path.join(RAW_DIR, "*.vcf.gz"))
@@ -23,7 +23,7 @@ if len(vcf_paths) == 0:
 all_geno = []
 all_samples = set()
 
-# Step 1: read each VCF
+# Read VCFs
 for vcf in vcf_paths:
     print(f"\nReading {vcf}")
     callset = allel.read_vcf(vcf, fields=["samples", "calldata/GT", "variants/ID"])
@@ -32,7 +32,7 @@ for vcf in vcf_paths:
     gt = allel.GenotypeArray(callset["calldata/GT"]).to_n_alt()
     markers = callset["variants/ID"]
 
-    # Prefix markers with filename to avoid collisions
+    # Add filename prefix to markers
     prefix = os.path.basename(vcf).replace(".vcf", "").replace(".gz", "")
     markers = [f"{prefix}_{m}" for m in markers]
 
@@ -42,15 +42,15 @@ for vcf in vcf_paths:
     all_geno.append(df)
     all_samples.update(samples)
 
-# Step 2: union of all samples across all VCFs
+# Combine sample list
 all_samples = sorted(list(all_samples))
 merged = pd.DataFrame({"germplasmName": all_samples})
 
-# Step 3: merge each VCF matrix (union mode)
+# Merge genotype matrices
 for df in all_geno:
     merged = merged.merge(df, on="germplasmName", how="left")
 
-# Step 4: save merged genotype matrix
+# Save output
 output_path = "data/processed/geno_merged_raw.csv"
 merged.to_csv(output_path, index=False)
 

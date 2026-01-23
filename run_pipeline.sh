@@ -5,10 +5,7 @@ echo "======================================"
 echo "  T3/Wheat Predictathon Pipeline"
 echo "======================================"
 
-# ---------------------------------------------------------
-# Optional cleaning step
-# Usage: ./run_pipeline.sh --clean
-# ---------------------------------------------------------
+# Cleaning option
 if [[ "${1:-}" == "--clean" ]]; then
     echo "Cleaning workspace..."
 
@@ -21,16 +18,12 @@ if [[ "${1:-}" == "--clean" ]]; then
     exit 0
 fi
 
-# ---------------------------------------------------------
-# Step 1: Modeling
-# ---------------------------------------------------------
+# Modeling
 echo "Running modeling..."
 snakemake modeling -p -j1
 echo "--------------------------------------"
 
-# ---------------------------------------------------------
-# Step 2: Build all submission files
-# ---------------------------------------------------------
+# Full pipeline
 echo "Running full pipeline..."
 snakemake -p -j1
 
