@@ -11,6 +11,7 @@ from models import (
     build_grm_from_geno,
 )
 from submission import write_submission_files
+from blups import compute_genotype_blups
 
 # Predictathon challenge trials
 FOCAL_TRIALS = [
@@ -28,41 +29,73 @@ FOCAL_TRIALS = [
 
 def main():
 
+    # ---------------------------------------------------------
     # Paths
+    # ---------------------------------------------------------
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = os.path.join(ROOT, "data", "processed")
     output_root = os.path.join(ROOT, "submission_output")
 
-    pheno_path = os.path.join(data_dir, "preprocessed_final.csv")
+    pheno_path = os.path.join(data_dir, "modeling_matrix_with_env.csv")
     geno_path = os.path.join(data_dir, "geno_merged_raw.csv")
 
-    # Load data
+    # ---------------------------------------------------------
+    # Load phenotype + genotype
+    # ---------------------------------------------------------
     print("\n=== Loading processed data ===")
     pheno = pd.read_csv(pheno_path)
     geno = pd.read_csv(geno_path)
     print(f"✓ Raw phenotype rows: {len(pheno)}")
     print(f"✓ Genotype matrix shape: {geno.shape}")
 
-    # Collapse long-format phenotype if needed
-    if {"germplasmName", "value"}.issubset(pheno.columns):
-        pheno = (
-            pheno.groupby("germplasmName")["value"]
-            .mean()
-            .reset_index()
-        )
-        print(f"✓ Collapsed phenotype to {len(pheno)} unique lines")
+    # ---------------------------------------------------------
+    # Extract environment covariates
+    # ---------------------------------------------------------
+    ENV_COLS = [
+        "T2M", "T2M_MAX", "T2M_MIN",
+        "PRECTOTCORR", "RH2M", "WS2M",
+        "ALLSKY_SFC_SW_DWN"
+    ]
+
+    missing_env = [c for c in ENV_COLS if c not in pheno.columns]
+    if missing_env:
+        raise ValueError(f"Missing environment columns in modeling_matrix_with_env.csv: {missing_env}")
+
+    env = pheno[["germplasmName", "studyName"] + ENV_COLS].copy()
+    print(f"✓ Loaded environment covariates with shape: {env.shape}")
+
+    # ---------------------------------------------------------
+    # Compute BLUPs
+    # ---------------------------------------------------------
+    print("\n=== Fitting mixed model for BLUPs ===")
+    blups = compute_genotype_blups(pheno)
+    print(f"✓ Got BLUPs for {len(blups)} genotypes")
+
+    # ---------------------------------------------------------
+    # Merge BLUPs back with studyName (CRITICAL for G×E)
+    # ---------------------------------------------------------
+    pheno_for_gblup = (
+        pheno[["germplasmName", "studyName"]]
+        .drop_duplicates()
+        .merge(blups, on="germplasmName", how="inner")
+        .rename(columns={"blup": "value"})
+    )
 
     # Keep only genotyped lines
     geno_lines = set(geno["germplasmName"])
-    before = len(pheno)
-    pheno = pheno[pheno["germplasmName"].isin(geno_lines)].reset_index(drop=True)
-    after = len(pheno)
+    before = len(pheno_for_gblup)
+    pheno_for_gblup = pheno_for_gblup[
+        pheno_for_gblup["germplasmName"].isin(geno_lines)
+    ]
+    after = len(pheno_for_gblup)
     print(f"✓ Filtered phenotype to genotyped lines: kept {after}, dropped {before - after}")
 
     if after == 0:
         raise ValueError("No phenotype lines overlap with genotype lines.")
 
+    # ---------------------------------------------------------
     # Build GRM
+    # ---------------------------------------------------------
     print("\n=== Building GRM ===")
     G, geno_lines_ordered = build_grm_from_geno(geno)
     print(f"✓ GRM shape: {G.shape}")
@@ -70,19 +103,22 @@ def main():
           float(G.diagonal().min()),
           float(G.diagonal().max()))
 
-    env = None
     MODEL_TYPE = "me_gblup"
 
+    # ---------------------------------------------------------
     # Create submission folders
+    # ---------------------------------------------------------
     print("\n=== Ensuring submission folder structure ===")
     for trial in FOCAL_TRIALS:
         for cv_type in ["CV0", "CV00"]:
             os.makedirs(os.path.join(output_root, trial, cv_type), exist_ok=True)
 
-    # CV1
+    # ---------------------------------------------------------
+    # CV1 cross-validation (environment-based)
+    # ---------------------------------------------------------
     print("\n=== Running CV1 cross-validation ===")
     cv_results = cross_validate_model(
-        train_pheno=pheno,
+        train_pheno=pheno_for_gblup,
         geno=geno,
         env=env,
         G=G,
@@ -100,17 +136,21 @@ def main():
     cv_results.to_csv(cv_out, index=False)
     print(f"✓ Saved CV1 results to {cv_out}")
 
+    # ---------------------------------------------------------
     # Fit final model
+    # ---------------------------------------------------------
     print("\n=== Fitting final model ===")
     model = fit_model(
-        train_pheno=pheno,
+        train_pheno=pheno_for_gblup,
         geno=geno,
         env=env,
         G=G,
         model_type=MODEL_TYPE,
     )
 
+    # ---------------------------------------------------------
     # Predict for challenge trials
+    # ---------------------------------------------------------
     print("\n=== Predicting for challenge trials ===")
     accession_list_dir = os.path.join(ROOT, "data", "raw", "accession_lists")
 
@@ -143,7 +183,7 @@ def main():
                 cv_type=cv_type,
                 preds_df=preds_df,
                 train_trials=["historical"],
-                train_accessions=pheno["germplasmName"].unique().tolist(),
+                train_accessions=pheno_for_gblup["germplasmName"].unique().tolist(),
                 output_root=output_root,
             )
 

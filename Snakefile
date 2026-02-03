@@ -68,7 +68,8 @@ EOF
 
 rule modeling:
     input:
-        PHENO_GENO_MERGED
+        pheno = MODELING_MATRIX,
+        geno  = MERGED_GENO
     output:
         directory("submission_output")
     shell:
