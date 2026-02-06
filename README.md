@@ -28,9 +28,3 @@ bash run_pipeline.sh
 
 
 Outputs are written to `submission_output/`.
-
-## Reproducibility
-
-- All code is version-controlled
-- Random seeds fixed where applicable
-- Snakemake workflow ensures end-to-end reproducibility
