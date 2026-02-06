@@ -2,15 +2,92 @@
 # Paths
 ###############################################
 
+RAW_DIR       = "data/raw"
 PROCESSED_DIR = "data/processed"
-RAW_DIR = "data/raw"
 
-MODELING_MATRIX = f"{PROCESSED_DIR}/modeling_matrix.csv"
-MERGED_GENO     = f"{PROCESSED_DIR}/geno_merged_raw.csv"
-PHENO_GENO_MERGED = f"{PROCESSED_DIR}/train_pheno_overlap.csv"
+RAW_PHENO              = f"{RAW_DIR}/pheno_processed.csv"
+CLEAN_PHENO            = f"{PROCESSED_DIR}/preprocessed_final.csv"
+MODELING_MATRIX        = f"{PROCESSED_DIR}/modeling_matrix.csv"
+ENV_COVARIATES         = f"{PROCESSED_DIR}/env_covariates.csv"
+MODELING_MATRIX_WITH_ENV = f"{PROCESSED_DIR}/modeling_matrix_with_env.csv"
+MERGED_GENO            = f"{PROCESSED_DIR}/geno_merged_raw.csv"
 
 ###############################################
-# merge_genotypes
+# 0. Preprocess raw T3 phenotype export
+###############################################
+
+rule preprocess_phenotypes:
+    input:
+        RAW_PHENO
+    output:
+        CLEAN_PHENO
+    run:
+        import pandas as pd
+        from src.phenotype_utils import (
+            clean_raw_t3_file,
+            standardize_yield_traits,
+            collapse_yield_traits
+        )
+
+        raw = pd.read_csv(input[0], encoding="latin1")
+
+        clean = clean_raw_t3_file(raw)
+        clean = standardize_yield_traits(clean)
+        clean = collapse_yield_traits(clean, target="grain_yield")
+
+        clean.to_csv(output[0], index=False)
+
+###############################################
+# 1. Build environmental covariates
+###############################################
+
+rule build_env_covariates:
+    input:
+        metadata = f"{RAW_DIR}/metadata.csv"
+    output:
+        ENV_COVARIATES
+    shell:
+        """
+        python src/aggregate_env.py \
+            --metadata {input.metadata} \
+            --out {output}
+        """
+
+###############################################
+# 2. Build modeling matrix (phenotype + metadata)
+###############################################
+
+rule modeling_matrix:
+    input:
+        pheno    = CLEAN_PHENO,
+        metadata = f"{RAW_DIR}/metadata.csv"
+    output:
+        MODELING_MATRIX
+    shell:
+        """
+        python src/modeling_matrix.py
+        """
+
+###############################################
+# 3. Merge environmental covariates into modeling matrix
+###############################################
+
+rule merge_env:
+    input:
+        matrix = MODELING_MATRIX,
+        env    = ENV_COVARIATES
+    output:
+        MODELING_MATRIX_WITH_ENV
+    shell:
+        """
+        python src/merge_env_into_modeling_matrix.py \
+            --matrix {input.matrix} \
+            --env {input.env} \
+            --out {output}
+        """
+
+###############################################
+# 4. Merge genotypes
 ###############################################
 
 rule merge_genotypes:
@@ -22,53 +99,12 @@ rule merge_genotypes:
         """
 
 ###############################################
-# modeling_matrix
-###############################################
-
-rule modeling_matrix:
-    input:
-        pheno = f"{PROCESSED_DIR}/preprocessed_final.csv",
-        metadata = f"{RAW_DIR}/metadata.csv"
-    output:
-        MODELING_MATRIX
-    shell:
-        """
-        python src/modeling_matrix.py
-        """
-
-###############################################
-# merge_pheno_geno
-###############################################
-
-rule merge_pheno_geno:
-    input:
-        pheno = MODELING_MATRIX,
-        geno  = MERGED_GENO
-    output:
-        PHENO_GENO_MERGED
-    shell:
-        """
-        export PYTHONPATH="${{PYTHONPATH:-}}:src"
-
-        python - << 'EOF'
-from genotype_utils import load_genotype_matrix, merge_pheno_geno
-import pandas as pd
-
-pheno = pd.read_csv("{input.pheno}")
-geno = load_genotype_matrix("{input.geno}")
-
-merged = merge_pheno_geno(pheno, geno)
-merged.to_csv("{output}", index=False)
-EOF
-        """
-
-###############################################
-# modeling
+# 5. Run modeling (main pipeline)
 ###############################################
 
 rule modeling:
     input:
-        pheno = MODELING_MATRIX,
+        pheno = MODELING_MATRIX_WITH_ENV,
         geno  = MERGED_GENO
     output:
         directory("submission_output")
@@ -78,7 +114,7 @@ rule modeling:
         """
 
 ###############################################
-# visualize_cv1
+# 6. Visualize CV1
 ###############################################
 
 rule visualize_cv1:
