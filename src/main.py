@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
 import os
-import pandas as pd
 import numpy as np
+import pandas as pd
+from scipy.stats import pearsonr
 
 from models import (
     fit_model,
@@ -12,6 +13,7 @@ from models import (
 )
 from submission import write_submission_files
 from blups import compute_genotype_blups
+
 
 # Predictathon challenge trials
 FOCAL_TRIALS = [
@@ -49,17 +51,30 @@ def main():
     print(f"✓ Genotype matrix shape: {geno.shape}")
 
     # ---------------------------------------------------------
+    # Filter trials with fewer than 5 records
+    # ---------------------------------------------------------
+    print("\n=== Filtering trials with < 5 phenotype records ===")
+    trial_sizes = pheno.groupby("studyName").size()
+    small_trials = trial_sizes[trial_sizes < 5].index.tolist()
+    print(f"Trials with < 5 records: {len(small_trials)}")
+
+    pheno = pheno[~pheno["studyName"].isin(small_trials)].copy()
+    print(f"After removing <5-record trials: {len(pheno)} phenotype rows")
+
+    # ---------------------------------------------------------
     # Extract environment covariates
     # ---------------------------------------------------------
     ENV_COLS = [
         "T2M", "T2M_MAX", "T2M_MIN",
         "PRECTOTCORR", "RH2M", "WS2M",
-        "ALLSKY_SFC_SW_DWN"
+        "ALLSKY_SFC_SW_DWN",
     ]
 
     missing_env = [c for c in ENV_COLS if c not in pheno.columns]
     if missing_env:
-        raise ValueError(f"Missing environment columns in modeling_matrix_with_env.csv: {missing_env}")
+        raise ValueError(
+            f"Missing environment columns in modeling_matrix_with_env.csv: {missing_env}"
+        )
 
     env = pheno[["germplasmName", "studyName"] + ENV_COLS].copy()
     print(f"✓ Loaded environment covariates with shape: {env.shape}")
@@ -99,9 +114,7 @@ def main():
     print("\n=== Building GRM ===")
     G, geno_lines_ordered = build_grm_from_geno(geno)
     print(f"✓ GRM shape: {G.shape}")
-    print("GRM diag range:",
-          float(G.diagonal().min()),
-          float(G.diagonal().max()))
+    print("GRM diag range:", float(G.diagonal().min()), float(G.diagonal().max()))
 
     MODEL_TYPE = "me_gblup"
 
@@ -109,6 +122,7 @@ def main():
     # Create submission folders
     # ---------------------------------------------------------
     print("\n=== Ensuring submission folder structure ===")
+    os.makedirs(output_root, exist_ok=True)
     for trial in FOCAL_TRIALS:
         for cv_type in ["CV0", "CV00"]:
             os.makedirs(os.path.join(output_root, trial, cv_type), exist_ok=True)
@@ -152,7 +166,9 @@ def main():
     # Predict for challenge trials
     # ---------------------------------------------------------
     print("\n=== Predicting for challenge trials ===")
+
     accession_list_dir = os.path.join(ROOT, "data", "raw", "accession_lists")
+    cv_types = ["CV0", "CV00"]
 
     for trial in FOCAL_TRIALS:
         trial_txt = os.path.join(accession_list_dir, f"{trial}.txt")
@@ -162,11 +178,12 @@ def main():
         with open(trial_txt, "r") as f:
             trial_accessions = [line.strip() for line in f if line.strip()]
 
-        print(f"\nLoaded {len(trial_accessions)} accessions for {trial}")
+        n_acc = len(trial_accessions)
+        print(f"\nLoaded {n_acc} accessions for {trial}")
 
-        for cv_type in ["CV0", "CV00"]:
+        for cv_type in cv_types:
             print(f"\n--- {trial} / {cv_type} ---")
-            print(f"  Predicting for {len(trial_accessions)} accessions")
+            print(f"  Predicting for {n_acc} accessions")
 
             preds_df = predict_for_trial(
                 model=model,
