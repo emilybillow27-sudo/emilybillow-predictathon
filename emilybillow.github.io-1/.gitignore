@@ -13,68 +13,14 @@ __pycache__/
 # Snakemake internals
 # -------------------------
 .snakemake/
-*.snakemake.log
-
-# -------------------------
-# Raw data
-# -------------------------
-# Ignore everything in data/raw except metadata + accession lists
-data/raw/*
-!data/raw/metadata.csv
-!data/raw/accession_lists/
-!data/raw/accession_lists/*.txt
-
-!data/raw/genos/
-!data/raw/genos/**
-
-# -------------------------
-# Processed data
-# -------------------------
-data/processed/*.npz
-data/processed/*.npy
-data/processed/*.rds
-
-# -------------------------
-# Ignore all CSVs by default
-# -------------------------
-*.csv
-
-# Allow small metadata files
-!data/*.md
-!data/*.txt
-
-# Allow metadata.csv specifically
-!data/raw/metadata.csv
-
-# -------------------------
-# Keep essential processed CSVs
-# -------------------------
-!data/processed/preprocessed_final.csv
-!data/processed/env_all_predictathon.csv
-!data/processed/env_all_high_overlap.csv
-
-# Allow small metadata files
-!data/*.md
-!data/*.txt
-
-# Allow metadata.csv specifically
-!data/raw/metadata.csv
-
-# -------------------------
-# Large binary files
-# -------------------------
-*.npz
-*.npy
-*.vcf
-*.tsv
-*.gz
-*.zip
 
 # -------------------------
 # Submission outputs
 # -------------------------
 submission_output/
 
-emilybillow.github.io-1/
-
+# -------------------------
+# Nested repos (cleanup)
+# -------------------------
 emilybillow.github.io/
+emilybillow.github.io-1/
