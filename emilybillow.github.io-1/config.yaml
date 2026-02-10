@@ -1,0 +1,24 @@
+# ============================================
+#   Predictathon Pipeline Configuration
+# ============================================
+
+# Trials for which CV0 / CV00 predictions will be generated
+focal_trials:
+  - AWY1_DVPWA_2024
+  - TCAP_2025_MANKS
+  - 25_Big6_SVREC_SVREC
+  - OHRWW_2025_SPO
+  - CornellMaster_2025_McGowan
+  - 24Crk_AY2-3
+  - 2025_AYT_Aurora
+  - YT_Urb_25
+  - STP1_2025_MCG
+
+# Trait configuration
+traits:
+  target_trait: value   # column name in train_pheno_overlap.csv
+
+# Model configuration
+model:
+  use_ml: false         # use RR-BLUP / GBLUP
+  lambda_factor: 1e-5   # ridge penalty scaling
