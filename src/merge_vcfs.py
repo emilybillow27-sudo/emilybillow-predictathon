@@ -5,7 +5,7 @@ import glob
 import os
 
 # Genotype directory
-RAW_DIR = "/Users/emilybillow/Desktop/emilybillow_data/raw"
+RAW_DIR = "data/raw/genos"
 
 # Find all VCFs
 vcf_paths = sorted(

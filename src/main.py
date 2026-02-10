@@ -3,7 +3,6 @@
 import os
 import numpy as np
 import pandas as pd
-from scipy.stats import pearsonr
 
 from models import (
     fit_model,
@@ -39,16 +38,33 @@ def main():
     output_root = os.path.join(ROOT, "submission_output")
 
     pheno_path = os.path.join(data_dir, "modeling_matrix_with_env.csv")
-    geno_path = os.path.join(data_dir, "geno_merged_raw.csv")
+    geno_csv = os.path.join(data_dir, "geno_merged_raw.csv")
 
     # ---------------------------------------------------------
     # Load phenotype + genotype
     # ---------------------------------------------------------
     print("\n=== Loading processed data ===")
-    pheno = pd.read_csv(pheno_path)
-    geno = pd.read_csv(geno_path)
+
+    pheno = pd.read_csv(
+        pheno_path,
+        dtype={
+            "germplasmName": "category",
+            "studyName": "category",
+        }
+    )
+
+    geno = pd.read_csv(geno_csv)
+    geno.iloc[:, 1:] = geno.iloc[:, 1:].astype("float32")
+
+    print("✓ Loaded genotype matrix from CSV")
     print(f"✓ Raw phenotype rows: {len(pheno)}")
     print(f"✓ Genotype matrix shape: {geno.shape}")
+
+    # ---------------------------------------------------------
+    # No trait filtering — file already contains only yield
+    # ---------------------------------------------------------
+    print("\n=== Using phenotype file (single trait: yield) ===")
+    print(f"✓ Phenotype rows: {len(pheno)}")
 
     # ---------------------------------------------------------
     # Filter trials with fewer than 5 records
@@ -61,6 +77,9 @@ def main():
     pheno = pheno[~pheno["studyName"].isin(small_trials)].copy()
     print(f"After removing <5-record trials: {len(pheno)} phenotype rows")
 
+    # 🔥 FIX 1: Drop unused categories after filtering
+    pheno["studyName"] = pheno["studyName"].cat.remove_unused_categories()
+
     # ---------------------------------------------------------
     # Extract environment covariates
     # ---------------------------------------------------------
@@ -72,22 +91,20 @@ def main():
 
     missing_env = [c for c in ENV_COLS if c not in pheno.columns]
     if missing_env:
-        raise ValueError(
-            f"Missing environment columns in modeling_matrix_with_env.csv: {missing_env}"
-        )
+        raise ValueError(f"Missing environment columns: {missing_env}")
 
     env = pheno[["germplasmName", "studyName"] + ENV_COLS].copy()
     print(f"✓ Loaded environment covariates with shape: {env.shape}")
 
     # ---------------------------------------------------------
-    # Compute BLUPs
+    # Compute BLUPs for yield
     # ---------------------------------------------------------
-    print("\n=== Fitting mixed model for BLUPs ===")
+    print("\n=== Fitting mixed model for BLUPs (yield) ===")
     blups = compute_genotype_blups(pheno)
     print(f"✓ Got BLUPs for {len(blups)} genotypes")
 
     # ---------------------------------------------------------
-    # Merge BLUPs back with studyName (CRITICAL for G×E)
+    # Merge BLUPs back with studyName (for G×E structure)
     # ---------------------------------------------------------
     pheno_for_gblup = (
         pheno[["germplasmName", "studyName"]]
@@ -107,6 +124,9 @@ def main():
 
     if after == 0:
         raise ValueError("No phenotype lines overlap with genotype lines.")
+
+    # 🔥 FIX 2: Drop unused categories again after filtering to genotyped lines
+    pheno_for_gblup["studyName"] = pheno_for_gblup["studyName"].cat.remove_unused_categories()
 
     # ---------------------------------------------------------
     # Build GRM
@@ -128,9 +148,10 @@ def main():
             os.makedirs(os.path.join(output_root, trial, cv_type), exist_ok=True)
 
     # ---------------------------------------------------------
-    # CV1 cross-validation (environment-based)
+    # CV1 cross-validation
     # ---------------------------------------------------------
     print("\n=== Running CV1 cross-validation ===")
+
     cv_results = cross_validate_model(
         train_pheno=pheno_for_gblup,
         geno=geno,
@@ -138,6 +159,7 @@ def main():
         G=G,
         model_type=MODEL_TYPE,
         n_folds=5,
+        progress_bar=False,
     )
 
     if {"value", "pred"}.issubset(cv_results.columns):
@@ -146,7 +168,7 @@ def main():
     else:
         print("Warning: cv_results missing required columns.")
 
-    cv_out = os.path.join(output_root, "cv1_results.csv")
+    cv_out = os.path.join(output_root, "cv1_results_yield_cv1.csv")
     cv_results.to_csv(cv_out, index=False)
     print(f"✓ Saved CV1 results to {cv_out}")
 
@@ -154,6 +176,7 @@ def main():
     # Fit final model
     # ---------------------------------------------------------
     print("\n=== Fitting final model ===")
+
     model = fit_model(
         train_pheno=pheno_for_gblup,
         geno=geno,
