@@ -20,8 +20,8 @@ def compute_genotype_blups(pheno_long: pd.DataFrame) -> pd.DataFrame:
     df = df[["value", "germplasmName"]].copy()
     df = df[df["value"].notna()].copy()
 
-    print("BLUP input shape after subsetting:", df.shape)
-    print("BLUP input columns:", df.columns.tolist())
+    # print("BLUP input shape after subsetting:", df.shape)
+    # print("BLUP input columns:", df.columns.tolist())
 
     y = df["value"].values
 

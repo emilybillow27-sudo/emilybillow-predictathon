@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from sklearn.metrics.pairwise import euclidean_distances
 
 
 # ---------------------------------------------------------
@@ -8,11 +9,13 @@ import pandas as pd
 def build_grm_from_geno(geno_df):
     """
     Build a genomic relationship matrix G from a wide genotype DataFrame.
-    geno_df: columns = germplasmName, marker1, marker2, ...
-    """
 
-    geno_lines = geno_df["germplasmName"].tolist()
-    X = geno_df.drop(columns=["germplasmName"]).to_numpy(dtype=float)
+    Assumes:
+        - geno_df.index = germplasmName
+        - columns = marker1, marker2, ...
+    """
+    geno_lines = geno_df.index.tolist()
+    X = geno_df.to_numpy(dtype=float)
 
     # Impute missing with column means
     col_means = np.nanmean(X, axis=0)
@@ -39,93 +42,123 @@ def build_grm_from_geno(geno_df):
 
 
 # ---------------------------------------------------------
-# Multi-environment GBLUP model
+# Environment kernel builder
 # ---------------------------------------------------------
-def fit_model(train_pheno, geno, env, G, model_type="me_gblup"):
+def build_env_kernel(env_df, env_id_col="studyName"):
     """
-    Multi-environment GBLUP (reaction-norm model):
-        y = Xb + Zu + Wv + e
+    Build an environment similarity kernel K_E from env covariates.
+    Handles missing values via column-mean imputation.
     """
 
-    # -----------------------------------------------------
-    # 1. Merge phenotype with environment covariates
-    # -----------------------------------------------------
-    df = train_pheno.merge(env, on=["germplasmName", "studyName"], how="left")
-
-    # Identify phenotype column
-    pheno_cols = [
-        c for c in df.columns
-        if c not in ["germplasmName", "studyName", "traitName"]
-        and c not in [
-            "T2M", "T2M_MAX", "T2M_MIN",
-            "PRECTOTCORR", "RH2M", "WS2M",
-            "ALLSKY_SFC_SW_DWN"
-        ]
-    ]
-    if len(pheno_cols) != 1:
-        raise ValueError(f"Could not identify phenotype column. Found: {pheno_cols}")
-    pheno_col = pheno_cols[0]
-
-    # -----------------------------------------------------
-    # 2. Fixed effects: NASA POWER covariates
-    # -----------------------------------------------------
     ENV_COLS = [
         "T2M", "T2M_MAX", "T2M_MIN",
         "PRECTOTCORR", "RH2M", "WS2M",
         "ALLSKY_SFC_SW_DWN"
     ]
-    X = df[ENV_COLS].to_numpy()
 
-    # -----------------------------------------------------
-    # 3. Random effects: genotype main effects (G kernel)
-    # -----------------------------------------------------
-    geno_lines = geno["germplasmName"].tolist()
-    train_lines = df["germplasmName"].tolist()
+    env_unique = env_df.drop_duplicates(subset=[env_id_col]).copy()
+    env_ids = env_unique[env_id_col].tolist()
 
-    idx = [geno_lines.index(l) for l in train_lines]
-    G_sub = G[np.ix_(idx, idx)]
+    # Extract matrix
+    X_env = env_unique[ENV_COLS].to_numpy(dtype=float)
 
-    # -----------------------------------------------------
-    # 4. Random effects: genotype × environment interaction
-    # -----------------------------------------------------
-    env_ids = df["studyName"].astype("category").cat.codes.to_numpy()
-    n_env = df["studyName"].nunique()
+    # Impute missing values
+    col_means = np.nanmean(X_env, axis=0)
+    inds = np.where(np.isnan(X_env))
+    if inds[0].size > 0:
+        X_env[inds] = np.take(col_means, inds[1])
 
-    W_env = np.zeros((len(df), n_env))
-    W_env[np.arange(len(df)), env_ids] = 1
+    # Compute distances
+    D = euclidean_distances(X_env, X_env)
 
-    GE_kernel = G_sub * (W_env @ W_env.T)
+    # Scale parameter
+    sigma = np.median(D[D > 0]) if np.any(D > 0) else 1.0
 
-    # -----------------------------------------------------
-    # 5. Solve mixed model using ridge approximation
-    # -----------------------------------------------------
-    y = df[pheno_col].to_numpy()
+    # Gaussian kernel
+    K_E = np.exp(-(D ** 2) / (2 * sigma ** 2))
+
+    return K_E, env_ids, ENV_COLS
+
+
+# ---------------------------------------------------------
+# Multi-environment GBLUP with G, E, and GxE kernels
+# ---------------------------------------------------------
+def fit_model(train_pheno, geno, env, G, model_type="me_gblup"):
+    """
+    Multi-environment GBLUP with:
+        - Genomic kernel K_G
+        - Environment kernel K_E
+        - GxE kernel K_GE = K_G ⊗ K_E (approximated via elementwise product)
+    """
+
+    # Merge phenotype with environment covariates
+    df = train_pheno.merge(env, on=["studyName"], how="left")
+
+    # Explicit phenotype column
+    if "value" not in df.columns:
+        raise ValueError("Phenotype column 'value' not found in phenotype DataFrame.")
+    y = df["value"].astype(float).to_numpy()
     y_mean = y.mean()
     y_centered = y - y_mean
 
-    lambda_g = 1.0
-    lambda_ge = 1.0
+    # Environment kernel
+    K_E, env_ids, ENV_COLS = build_env_kernel(env, env_id_col="studyName")
 
-    K = (
-        G_sub
-        + GE_kernel
-        + lambda_g * np.eye(len(G_sub))
-        + lambda_ge * np.eye(len(G_sub))
+    # Map lines in pheno to genotype indices
+    geno_lines = geno.index.tolist()
+    train_lines = df["germplasmName"].tolist()
+    line_idx = [geno_lines.index(l) for l in train_lines]
+
+    # Subset G to training lines
+    G_sub = G[np.ix_(line_idx, line_idx)]
+
+    # Map environments in pheno to env kernel indices
+    env_idx_map = {e: i for i, e in enumerate(env_ids)}
+    env_idx = [env_idx_map[e] for e in df["studyName"].tolist()]
+
+    # Build full K_E for observations
+    n_obs = len(df)
+    K_E_obs = np.zeros((n_obs, n_obs))
+    for i in range(n_obs):
+        ei = env_idx[i]
+        K_E_obs[i, :] = K_E[ei, env_idx]
+
+    # Genomic kernel for observations
+    K_G_obs = G_sub
+
+    # GxE kernel
+    K_GE_obs = K_G_obs * K_E_obs
+
+    # Kernel weights
+    w_g = 1.0
+    w_ge = 1.0
+    lambda_ridge = 1.0
+
+    K_combined = (
+        w_g * K_G_obs
+        + w_ge * K_GE_obs
+        + lambda_ridge * np.eye(n_obs)
     )
 
     try:
-        u = np.linalg.solve(K, y_centered)
+        u = np.linalg.solve(K_combined, y_centered)
     except np.linalg.LinAlgError:
-        u = np.linalg.lstsq(K, y_centered, rcond=None)[0]
+        u = np.linalg.lstsq(K_combined, y_centered, rcond=None)[0]
 
     return {
         "train_lines": train_lines,
+        "train_envs": df["studyName"].tolist(),
         "u": u,
         "geno_lines": geno_lines,
         "G_full": G,
         "y_mean": y_mean,
         "env_cols": ENV_COLS,
         "env_df": env,
+        "K_E": K_E,
+        "env_ids": env_ids,
+        "w_g": w_g,
+        "w_ge": w_ge,
+        "lambda_ridge": lambda_ridge
     }
 
 
@@ -133,19 +166,25 @@ def fit_model(train_pheno, geno, env, G, model_type="me_gblup"):
 # Prediction for a trial
 # ---------------------------------------------------------
 def predict_for_trial(model, focal_trial, test_accessions, geno, env, G, model_type="me_gblup"):
-    """
-    Predict using multi-environment GBLUP:
-        y_hat ≈ y_mean + G_test,train * u
-    """
 
     u = model["u"]
     train_lines = model["train_lines"]
+    train_envs = model["train_envs"]
     geno_lines = model["geno_lines"]
     y_mean = model["y_mean"]
+    K_E = model["K_E"]
+    env_ids = model["env_ids"]
+    w_g = model["w_g"]
+    w_ge = model["w_ge"]
 
-    geno_lines_list = geno["germplasmName"].tolist()
+    geno_lines_list = list(geno.index)
 
-    # Map test accessions to genotype indices
+    # Map training lines/envs
+    train_line_idx = [geno_lines_list.index(l) for l in train_lines]
+    env_idx_map = {e: i for i, e in enumerate(env_ids)}
+    train_env_idx = [env_idx_map[e] for e in train_envs]
+
+    # Build K_G_test_train
     test_idx = []
     for acc in test_accessions:
         if acc in geno_lines_list:
@@ -153,18 +192,29 @@ def predict_for_trial(model, focal_trial, test_accessions, geno, env, G, model_t
         else:
             test_idx.append(None)
 
-    train_idx = [geno_lines_list.index(l) for l in train_lines]
-
     G_test_train = []
     for idx in test_idx:
         if idx is None:
-            G_test_train.append(np.zeros(len(train_lines)))
+            G_test_train.append(np.zeros(len(train_line_idx)))
         else:
-            G_test_train.append(G[idx, train_idx])
-
+            G_test_train.append(G[idx, train_line_idx])
     G_test_train = np.array(G_test_train)
 
-    g_hat = G_test_train @ u
+    # Environment index for focal trial
+    if focal_trial not in env_idx_map:
+        K_E_test_train = np.ones((len(test_accessions), len(train_env_idx)))
+    else:
+        focal_env_idx = env_idx_map[focal_trial]
+        K_E_test_train = K_E[focal_env_idx, train_env_idx]
+        K_E_test_train = np.tile(K_E_test_train, (len(test_accessions), 1))
+
+    # Combine kernels
+    K_G_test = G_test_train
+    K_GE_test = G_test_train * K_E_test_train
+
+    K_test_train = w_g * K_G_test + w_ge * K_GE_test
+
+    g_hat = K_test_train @ u
     y_hat = y_mean + g_hat
 
     return pd.DataFrame({
@@ -174,67 +224,33 @@ def predict_for_trial(model, focal_trial, test_accessions, geno, env, G, model_t
 
 
 # ---------------------------------------------------------
-# CV1 cross-validation (scientific, slower, correct)
+# CV1 cross-validation
 # ---------------------------------------------------------
-def cross_validate_model(
-    train_pheno,
-    geno,
-    env,
-    G,
-    model_type="me_gblup",
-    n_folds=5,
-    progress_bar=False
-):
-    """
-    Full scientific CV1 cross-validation (environment-based).
-    ---------------------------------------------------------
-    - Hold out entire environments.
-    - Refit the mixed model on training environments only.
-    - Predict held-out environments using GBLUP.
-    """
+def cross_validate_model(train_pheno, geno, env, G, model_type="me_gblup", n_folds=5):
 
-    # Identify phenotype column
-    pheno_cols = [
-        c for c in train_pheno.columns
-        if c not in ["germplasmName", "studyName", "traitName"]
-    ]
-    if len(pheno_cols) != 1:
-        raise ValueError(f"Could not identify phenotype column. Found: {pheno_cols}")
-    pheno_col = pheno_cols[0]
+    pheno_col = "value"
+    if pheno_col not in train_pheno.columns:
+        raise ValueError("Phenotype column 'value' not found.")
 
-    # Shuffle environments for fold assignment
     envs = train_pheno["studyName"].unique()
     rng = np.random.default_rng(42)
     rng.shuffle(envs)
-
     folds = np.array_split(envs, n_folds)
-
-    # No progress bar — simple loop
-    fold_iter = folds
 
     results = []
 
-    for fold_id, test_envs in enumerate(fold_iter, start=1):
+    for fold_id, test_envs in enumerate(folds, start=1):
         test_envs = list(test_envs)
 
-        # Split phenotype
         train_df = train_pheno[~train_pheno["studyName"].isin(test_envs)]
         test_df = train_pheno[train_pheno["studyName"].isin(test_envs)]
 
-        # Fit model on training environments only
-        model = fit_model(
-            train_pheno=train_df,
-            geno=geno,
-            env=env,
-            G=G,
-            model_type=model_type,
-        )
+        model = fit_model(train_df, geno, env, G)
 
-        # Predict for each held-out environment
         for env_name in test_envs:
-            test_accessions = (
-                test_df[test_df["studyName"] == env_name]["germplasmName"].tolist()
-            )
+            test_accessions = test_df.loc[
+                test_df["studyName"] == env_name, "germplasmName"
+            ].tolist()
 
             preds = predict_for_trial(
                 model=model,
@@ -242,8 +258,7 @@ def cross_validate_model(
                 test_accessions=test_accessions,
                 geno=geno,
                 env=env,
-                G=G,
-                model_type=model_type,
+                G=G
             )
 
             merged = (

@@ -1,6 +1,6 @@
 ###############################################
 #   T3/Wheat Predictathon — Full Pipeline
-#   Clean, cycle‑free, uses internal filtering
+#   Clean, cycle‑free, train + predict split
 ###############################################
 
 rule all:
@@ -51,23 +51,45 @@ rule merge_env:
 
 
 ############################################################
-# 4. Modeling (BLUPs → GRM → CV1 → predictions)
-#    Uses your existing filtering logic inside main.py
+# 4. Train model → trained_models/
+#    Produces: final_model.joblib, GRM.npy, training_* files
 ############################################################
-rule modeling:
+rule train_model:
     input:
         pheno="data/processed/modeling_matrix_with_env.csv",
         geno="data/processed/geno_merged_raw.csv"
     output:
-        "submission_output/cv1_results.csv"
+        "trained_models/final_model.joblib",
+        "trained_models/GRM.npy",
+        "trained_models/training_pheno_used.csv",
+        "trained_models/training_geno_used.csv",
+        "trained_models/training_env_used.csv"
     shell:
         """
-        python src/main.py
+        python src/train_model.py
         """
 
 
 ############################################################
-# 5. Visualization
+# 5. Predict using trained model → cv1_results.csv
+############################################################
+rule predict_model:
+    input:
+        model="trained_models/final_model.joblib",
+        pheno="trained_models/training_pheno_used.csv",
+        geno="trained_models/training_geno_used.csv",
+        env="trained_models/training_env_used.csv",
+        grm="trained_models/GRM.npy"
+    output:
+        "submission_output/cv1_results.csv"
+    shell:
+        """
+        python src/predict_model.py
+        """
+
+
+############################################################
+# 6. Visualization
 ############################################################
 rule visualize_cv1:
     input:
