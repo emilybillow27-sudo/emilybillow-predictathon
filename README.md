@@ -12,6 +12,7 @@ This repository contains a fully reproducible genomic prediction pipeline develo
 
 ## Repository Structure
 
+```
 data/
   raw/            # VCFs, raw phenotypes, metadata, accession lists
   processed/      # cleaned phenotypes, merged genotypes, modeling matrices
@@ -21,6 +22,7 @@ trained_models/   # saved GRM and model artifacts
 Snakefile         # workflow definition
 run_pipeline.sh   # wrapper script
 config.yaml       # trait, trial, and model settings
+```
 
 ## Challenge Trials
 
@@ -35,8 +37,13 @@ YT_Urb_25
 STP1_2025_MCG  
 
 ## Running the Pipeline
-
+```
 bash run_pipeline.sh
+```
 
+## Force a clean rebuild
+```
+bash run_pipeline --clean
+```
 
 Outputs are written to `submission_output/`
