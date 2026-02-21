@@ -1,0 +1,68 @@
+flowchart TB
+
+%% ---------------------------------------------------------
+%% Phenotype lane
+%% ---------------------------------------------------------
+subgraph PHENO[Phenotype Processing]
+    A1[Raw Phenotypes]
+    A2[Harmonize and Clean]
+    A3[Filter Tiny Trials]
+    A4[Extract Env Covariates]
+    A5[Compute Genotype BLUPs]
+
+    A1 --> A2 --> A3 --> A4 --> A5
+end
+
+%% ---------------------------------------------------------
+%% Genotype lane
+%% ---------------------------------------------------------
+subgraph GENO[Genotype Processing]
+    B1[Raw VCFs]
+    B2[Merge and QC]
+    B3[Cache Genotype Matrix PKL]
+    B4[Build GRM]
+
+    B1 --> B2 --> B3 --> B4
+end
+
+%% ---------------------------------------------------------
+%% Model lane
+%% ---------------------------------------------------------
+subgraph MODEL[Model Training]
+    C1[Assemble Training Matrix]
+    C2[Reaction Norm GBLUP]
+    C3[Fit Final Model]
+
+    C1 --> C2 --> C3
+end
+
+%% ---------------------------------------------------------
+%% Output lane
+%% ---------------------------------------------------------
+subgraph OUTPUT[Outputs]
+    D1[Save Model Artifacts]
+    D2[GRM and Lines]
+    D3[Training Metadata]
+
+    D1 --> D2 --> D3
+end
+
+%% ---------------------------------------------------------
+%% Cross lane connections
+%% ---------------------------------------------------------
+A5 --> C1
+B4 --> C1
+C3 --> D1
+
+%% ---------------------------------------------------------
+%% Color coding
+%% ---------------------------------------------------------
+classDef pheno fill:#8ecae6,stroke:#023047,color:#000;
+classDef geno fill:#b7e4c7,stroke:#1b4332,color:#000;
+classDef model fill:#ffd6a5,stroke:#7a4f01,color:#000;
+classDef out fill:#cdb4db,stroke:#5a189a,color:#000;
+
+class A1,A2,A3,A4,A5 pheno;
+class B1,B2,B3,B4 geno;
+class C1,C2,C3 model;
+class D1,D2,D3 out;

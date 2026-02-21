@@ -6,16 +6,11 @@ from sklearn.metrics.pairwise import euclidean_distances
 # ---------------------------------------------------------
 # GRM builder
 # ---------------------------------------------------------
-def build_grm_from_geno(geno_df):
+def build_grm_from_geno(geno_numeric):
     """
-    Build a genomic relationship matrix G from a wide genotype DataFrame.
-
-    Assumes:
-        - geno_df.index = germplasmName
-        - columns = marker1, marker2, ...
+    geno_numeric: numeric-only genotype matrix (rows = lines, cols = markers)
     """
-    geno_lines = geno_df.index.tolist()
-    X = geno_df.to_numpy(dtype=float)
+    X = geno_numeric.to_numpy(dtype=float)
 
     # Impute missing with column means
     col_means = np.nanmean(X, axis=0)
@@ -38,18 +33,13 @@ def build_grm_from_geno(geno_df):
     # VanRaden-like GRM
     G = (X_centered @ X_centered.T) / m
 
-    return G, geno_lines
+    return G
 
 
 # ---------------------------------------------------------
 # Environment kernel builder
 # ---------------------------------------------------------
 def build_env_kernel(env_df, env_id_col="studyName"):
-    """
-    Build an environment similarity kernel K_E from env covariates.
-    Handles missing values via column-mean imputation.
-    """
-
     ENV_COLS = [
         "T2M", "T2M_MAX", "T2M_MIN",
         "PRECTOTCORR", "RH2M", "WS2M",
@@ -59,85 +49,74 @@ def build_env_kernel(env_df, env_id_col="studyName"):
     env_unique = env_df.drop_duplicates(subset=[env_id_col]).copy()
     env_ids = env_unique[env_id_col].tolist()
 
-    # Extract matrix
     X_env = env_unique[ENV_COLS].to_numpy(dtype=float)
 
-    # Impute missing values
+    # Impute missing
     col_means = np.nanmean(X_env, axis=0)
     inds = np.where(np.isnan(X_env))
     if inds[0].size > 0:
         X_env[inds] = np.take(col_means, inds[1])
 
-    # Compute distances
     D = euclidean_distances(X_env, X_env)
-
-    # Scale parameter
     sigma = np.median(D[D > 0]) if np.any(D > 0) else 1.0
 
-    # Gaussian kernel
     K_E = np.exp(-(D ** 2) / (2 * sigma ** 2))
 
     return K_E, env_ids, ENV_COLS
 
 
 # ---------------------------------------------------------
-# Multi-environment GBLUP with G, E, and GxE kernels
+# Multi-environment GBLUP
 # ---------------------------------------------------------
-def fit_model(train_pheno, geno, env, G, model_type="me_gblup"):
+def fit_model(train_pheno, geno_numeric, geno_lines, env, G, model_type="me_gblup"):
     """
-    Multi-environment GBLUP with:
-        - Genomic kernel K_G
-        - Environment kernel K_E
-        - GxE kernel K_GE = K_G ⊗ K_E (approximated via elementwise product)
+    train_pheno: DataFrame with ['germplasmName','studyName','value']
+    geno_numeric: numeric-only genotype matrix
+    geno_lines: list of germplasm names in same order as geno_numeric rows
+    env: environment covariates
+    G: full GRM
     """
 
-    # Merge phenotype with environment covariates
-    df = train_pheno.merge(env, on=["studyName"], how="left")
+    df = train_pheno.copy()
 
-    # Explicit phenotype column
-    if "value" not in df.columns:
-        raise ValueError("Phenotype column 'value' not found in phenotype DataFrame.")
+    # phenotype vector
     y = df["value"].astype(float).to_numpy()
     y_mean = y.mean()
     y_centered = y - y_mean
 
-    # Environment kernel
+    # environment kernel
     K_E, env_ids, ENV_COLS = build_env_kernel(env, env_id_col="studyName")
 
-    # Map lines in pheno to genotype indices
-    geno_lines = geno.index.tolist()
+    # map lines to genotype indices
     train_lines = df["germplasmName"].tolist()
     line_idx = [geno_lines.index(l) for l in train_lines]
 
-    # Subset G to training lines
+    # subset G
     G_sub = G[np.ix_(line_idx, line_idx)]
 
-    # Map environments in pheno to env kernel indices
+    # map environments
     env_idx_map = {e: i for i, e in enumerate(env_ids)}
     env_idx = [env_idx_map[e] for e in df["studyName"].tolist()]
 
-    # Build full K_E for observations
+    # build K_E for observations
     n_obs = len(df)
     K_E_obs = np.zeros((n_obs, n_obs))
     for i in range(n_obs):
         ei = env_idx[i]
         K_E_obs[i, :] = K_E[ei, env_idx]
 
-    # Genomic kernel for observations
+    # kernels
     K_G_obs = G_sub
-
-    # GxE kernel
     K_GE_obs = K_G_obs * K_E_obs
 
-    # Kernel weights
     w_g = 1.0
     w_ge = 1.0
     lambda_ridge = 1.0
 
     K_combined = (
-        w_g * K_G_obs
-        + w_ge * K_GE_obs
-        + lambda_ridge * np.eye(n_obs)
+        w_g * K_G_obs +
+        w_ge * K_GE_obs +
+        lambda_ridge * np.eye(n_obs)
     )
 
     try:
@@ -158,40 +137,40 @@ def fit_model(train_pheno, geno, env, G, model_type="me_gblup"):
         "env_ids": env_ids,
         "w_g": w_g,
         "w_ge": w_ge,
-        "lambda_ridge": lambda_ridge
+        "lambda_ridge": lambda_ridge,
     }
 
 
 # ---------------------------------------------------------
-# Prediction for a trial
+# Prediction
 # ---------------------------------------------------------
-def predict_for_trial(model, focal_trial, test_accessions, geno, env, G, model_type="me_gblup"):
+def predict_for_trial(model, focal_trial, test_accessions, geno_numeric, geno_lines, env, G, model_type="me_gblup"):
 
     u = model["u"]
     train_lines = model["train_lines"]
     train_envs = model["train_envs"]
-    geno_lines = model["geno_lines"]
     y_mean = model["y_mean"]
     K_E = model["K_E"]
     env_ids = model["env_ids"]
     w_g = model["w_g"]
     w_ge = model["w_ge"]
 
-    geno_lines_list = list(geno.index)
+    # map training lines
+    train_line_idx = [geno_lines.index(l) for l in train_lines]
 
-    # Map training lines/envs
-    train_line_idx = [geno_lines_list.index(l) for l in train_lines]
+    # map environments
     env_idx_map = {e: i for i, e in enumerate(env_ids)}
     train_env_idx = [env_idx_map[e] for e in train_envs]
 
-    # Build K_G_test_train
+    # map test accessions
     test_idx = []
     for acc in test_accessions:
-        if acc in geno_lines_list:
-            test_idx.append(geno_lines_list.index(acc))
+        if acc in geno_lines:
+            test_idx.append(geno_lines.index(acc))
         else:
             test_idx.append(None)
 
+    # K_G_test_train
     G_test_train = []
     for idx in test_idx:
         if idx is None:
@@ -200,7 +179,7 @@ def predict_for_trial(model, focal_trial, test_accessions, geno, env, G, model_t
             G_test_train.append(G[idx, train_line_idx])
     G_test_train = np.array(G_test_train)
 
-    # Environment index for focal trial
+    # K_E_test_train
     if focal_trial not in env_idx_map:
         K_E_test_train = np.ones((len(test_accessions), len(train_env_idx)))
     else:
@@ -208,7 +187,7 @@ def predict_for_trial(model, focal_trial, test_accessions, geno, env, G, model_t
         K_E_test_train = K_E[focal_env_idx, train_env_idx]
         K_E_test_train = np.tile(K_E_test_train, (len(test_accessions), 1))
 
-    # Combine kernels
+    # combine kernels
     K_G_test = G_test_train
     K_GE_test = G_test_train * K_E_test_train
 
@@ -226,7 +205,7 @@ def predict_for_trial(model, focal_trial, test_accessions, geno, env, G, model_t
 # ---------------------------------------------------------
 # CV1 cross-validation
 # ---------------------------------------------------------
-def cross_validate_model(train_pheno, geno, env, G, model_type="me_gblup", n_folds=5):
+def cross_validate_model(train_pheno, geno_numeric, geno_lines, env, G, model_type="me_gblup", n_folds=5):
 
     pheno_col = "value"
     if pheno_col not in train_pheno.columns:
@@ -245,7 +224,14 @@ def cross_validate_model(train_pheno, geno, env, G, model_type="me_gblup", n_fol
         train_df = train_pheno[~train_pheno["studyName"].isin(test_envs)]
         test_df = train_pheno[train_pheno["studyName"].isin(test_envs)]
 
-        model = fit_model(train_df, geno, env, G)
+        model = fit_model(
+            train_pheno=train_df,
+            geno_numeric=geno_numeric,
+            geno_lines=geno_lines,
+            env=env,
+            G=G,
+            model_type=model_type
+        )
 
         for env_name in test_envs:
             test_accessions = test_df.loc[
@@ -256,9 +242,11 @@ def cross_validate_model(train_pheno, geno, env, G, model_type="me_gblup", n_fol
                 model=model,
                 focal_trial=env_name,
                 test_accessions=test_accessions,
-                geno=geno,
+                geno_numeric=geno_numeric,
+                geno_lines=geno_lines,
                 env=env,
-                G=G
+                G=G,
+                model_type=model_type,
             )
 
             merged = (
