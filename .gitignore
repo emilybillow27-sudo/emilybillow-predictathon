@@ -9,3 +9,6 @@ __pycache__/
 # Editor junk
 *.swp
 *.swo
+
+trained_models/geno_numeric_imputed.npy
+trained_models/training_metadata.pkl
