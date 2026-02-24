@@ -1,14 +1,63 @@
-# Python junk
+# -------------------------
+# OS / Editor junk
+# -------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# -------------------------
+# Python cache
+# -------------------------
 __pycache__/
 *.pyc
 *.pyo
 
-# OS junk
-.DS_Store
+# -------------------------
+# Jupyter
+# -------------------------
+.ipynb_checkpoints/
 
-# Editor junk
-*.swp
-*.swo
-
+# -------------------------
+# Model artifacts (too large for GitHub)
+# -------------------------
 trained_models/geno_numeric_imputed.npy
 trained_models/training_metadata.pkl
+trained_models/GRM.npy
+trained_models/final_model.joblib
+trained_models/*.npy
+trained_models/*.npz
+trained_models/*.pkl
+trained_models/*.joblib
+
+# -------------------------
+# Intermediate data
+# -------------------------
+data/processed/*
+!data/processed/env_all_standardized.csv
+!data/processed/env_covariates.csv
+!data/processed/env_covariates_standardized.csv
+!data/processed/env_historical_standardized.csv
+!data/processed/historical_env_list.csv
+!data/processed/historical_env_metadata.csv
+!data/processed/preprocessed_final.csv
+
+# -------------------------
+# Raw genotypes (handled by Git LFS)
+# -------------------------
+data/raw/genos/*.vcf
+data/raw/genos/*.vcf.gz
+
+# -------------------------
+# Predictathon outputs
+# -------------------------
+predictathon_submission/*/*_Predictions.csv
+predictathon_submission/*/*_Accessions.csv
+predictathon_submission/*/*_Trials.csv
+
+# -------------------------
+# Logs / temp files
+# -------------------------
+*.log
+*.tmp
+*.bak
