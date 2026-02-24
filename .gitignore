@@ -1,26 +1,11 @@
-# -------------------------
-# macOS junk
-# -------------------------
-.DS_Store
-
-# -------------------------
-# Python cache
-# -------------------------
+# Python junk
 __pycache__/
 *.pyc
+*.pyo
 
-# -------------------------
-# Snakemake internals
-# -------------------------
-.snakemake/
+# OS junk
+.DS_Store
 
-# -------------------------
-# Submission outputs
-# -------------------------
-submission_output/
-
-# -------------------------
-# Nested repos (cleanup)
-# -------------------------
-emilybillow.github.io/
-emilybillow.github.io-1/
+# Editor junk
+*.swp
+*.swo

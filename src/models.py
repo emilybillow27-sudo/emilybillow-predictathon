@@ -9,8 +9,14 @@ from sklearn.metrics.pairwise import euclidean_distances
 def build_grm_from_geno(geno_numeric):
     """
     geno_numeric: numeric-only genotype matrix (rows = lines, cols = markers)
+    Accepts either a pandas DataFrame or a NumPy array.
     """
-    X = geno_numeric.to_numpy(dtype=float)
+
+    # Safely convert to NumPy
+    if hasattr(geno_numeric, "to_numpy"):
+        X = geno_numeric.to_numpy(dtype=float)
+    else:
+        X = np.asarray(geno_numeric, dtype=float)
 
     # Impute missing with column means
     col_means = np.nanmean(X, axis=0)

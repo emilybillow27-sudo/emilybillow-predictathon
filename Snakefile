@@ -1,103 +1,107 @@
 ###############################################
 #   T3/Wheat Predictathon — Full Pipeline
-#   Clean, cycle‑free, train + predict split
 ###############################################
 
 rule all:
     input:
-        "submission_output/cv1_results.csv",
-        "submission_output/cv1_scatter.png",
-        "submission_output/cv1_foldwise_accuracy.png"
+        "predictathon_submission/ALL_DONE.txt"
 
 
 ############################################################
-# 1. Merge VCFs → geno_merged_raw.csv
+# 1. Extract historical env list
 ############################################################
-rule merge_vcfs:
+rule extract_env_list:
     output:
-        "data/processed/geno_merged_raw.csv"
+        "data/processed/historical_env_list.csv"
     shell:
-        """
-        python src/merge_vcfs.py
-        """
+        "python src/extract_historical_env_list.py"
 
 
 ############################################################
-# 2. Build modeling matrix
+# 2. Build historical env metadata
 ############################################################
-rule build_modeling_matrix:
+rule build_env_metadata:
     input:
-        "data/processed/geno_merged_raw.csv"
+        "data/processed/historical_env_list.csv"
     output:
-        "data/processed/modeling_matrix.csv"
+        "data/processed/historical_env_metadata.csv"
     shell:
-        """
-        python src/modeling_matrix.py
-        """
+        "python src/build_historical_env_metadata.py"
 
 
 ############################################################
-# 3. Merge environment data
+# 3. Fetch historical weather
+############################################################
+rule fetch_weather:
+    input:
+        "data/processed/historical_env_metadata.csv"
+    output:
+        "data/processed/env_historical_standardized.csv"
+    shell:
+        "python src/fetch_historical_weather.py"
+
+
+############################################################
+# 4. Standardize Predictathon env covariates
+############################################################
+rule standardize_predictathon_env:
+    output:
+        "data/processed/env_covariates_standardized.csv"
+    shell:
+        "python src/standardize_env_covariates.py"
+
+
+############################################################
+# 5. Merge env covariates
 ############################################################
 rule merge_env:
     input:
-        "data/processed/modeling_matrix.csv"
+        hist="data/processed/env_historical_standardized.csv",
+        pred="data/processed/env_covariates_standardized.csv"
     output:
-        "data/processed/modeling_matrix_with_env.csv"
+        "data/processed/env_all_standardized.csv"
     shell:
-        """
-        python src/merge_env_into_modeling_matrix.py
-        """
+        "python src/merge_env_covariates.py"
 
 
 ############################################################
-# 4. Train model → trained_models/
-#    Produces: final_model.joblib, GRM.npy, training_* files
+# 6. Preprocess genotypes
+############################################################
+rule preprocess_genotypes:
+    output:
+        "trained_models/geno_numeric_imputed.npy",
+        "trained_models/geno_lines_imputed.pkl"
+    shell:
+        "python src/preprocess_genotypes.py"
+
+
+############################################################
+# 7. Train ME-GBLUP model
 ############################################################
 rule train_model:
     input:
-        pheno="data/processed/modeling_matrix_with_env.csv",
-        geno="data/processed/geno_merged_raw.csv"
+        "trained_models/geno_numeric_imputed.npy",
+        "trained_models/geno_lines_imputed.pkl",
+        "data/processed/env_all_standardized.csv"
     output:
         "trained_models/final_model.joblib",
+        "trained_models/GRM.npy"
+    shell:
+        "python src/train_model.py"
+
+
+############################################################
+# 8. Build Predictathon submission (CV0 + CV00)
+############################################################
+rule build_submission:
+    input:
+        "trained_models/final_model.joblib",
         "trained_models/GRM.npy",
-        "trained_models/training_pheno_used.csv",
-        "trained_models/training_geno_used.csv",
-        "trained_models/training_env_used.csv"
-    shell:
-        """
-        python src/train_model.py
-        """
-
-
-############################################################
-# 5. Predict using trained model → cv1_results.csv
-############################################################
-rule predict_model:
-    input:
-        model="trained_models/final_model.joblib",
-        pheno="trained_models/training_pheno_used.csv",
-        geno="trained_models/training_geno_used.csv",
-        env="trained_models/training_env_used.csv",
-        grm="trained_models/GRM.npy"
+        "data/processed/env_all_standardized.csv"
     output:
-        "submission_output/cv1_results.csv"
+        "predictathon_submission/ALL_DONE.txt"
     shell:
         """
-        python src/predict_model.py
-        """
-
-
-############################################################
-# 6. Visualization
-############################################################
-rule visualize_cv1:
-    input:
-        "submission_output/cv1_results.csv"
-    output:
-        "submission_output/cv1_scatter.png",
-        "submission_output/cv1_foldwise_accuracy.png"
-    shell:
-        """
-        python src/visualize_cv1.py
+        python src/build_predictathon_submission.py
+        echo 'done' > predictathon_submission/ALL_DONE.txt
         """

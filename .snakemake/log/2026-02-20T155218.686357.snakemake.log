@@ -1,0 +1,60 @@
+Assuming unrestricted shared filesystem usage.
+host: sv168566-FWN179KHR9.local
+Building DAG of jobs...
+Using shell: /bin/bash
+Provided cores: 1 (use --cores to define parallelism)
+Rules claiming more threads will be scaled down.
+Job stats:
+job              count
+-------------  -------
+all                  1
+predict_model        1
+train_model          1
+visualize_cv1        1
+total                4
+
+Select jobs to execute...
+Execute 1 jobs...
+[Fri Feb 20 15:52:19 2026]
+localrule train_model:
+    input: data/processed/modeling_matrix_with_env.csv, data/processed/geno_merged_raw.csv
+    output: trained_models/final_model.joblib, trained_models/GRM.npy, trained_models/training_pheno_used.csv, trained_models/training_geno_used.csv, trained_models/training_env_used.csv
+    jobid: 2
+    reason: Missing output files: trained_models/GRM.npy, trained_models/final_model.joblib
+    resources: tmpdir=/var/folders/4b/85bnskg11gx8qwl4wzkw0ghw0000gn/T
+Shell command: 
+        python src/train_model.py
+        
+RuleException:
+CalledProcessError in file "/Users/emilybillow/emilybillow.github.io-8/Snakefile", line 68:
+Command 'set -euo pipefail;  
+        python src/train_model.py' returned non-zero exit status 1.
+[Fri Feb 20 16:15:03 2026]
+Error in rule train_model:
+    message: None
+    jobid: 2
+    input: data/processed/modeling_matrix_with_env.csv, data/processed/geno_merged_raw.csv
+    output: trained_models/final_model.joblib, trained_models/GRM.npy, trained_models/training_pheno_used.csv, trained_models/training_geno_used.csv, trained_models/training_env_used.csv
+    shell:
+        
+        python src/train_model.py
+        
+        (command exited with non-zero exit code)
+Removing output files of failed job train_model since they might be corrupted:
+trained_models/training_pheno_used.csv, trained_models/training_geno_used.csv, trained_models/training_env_used.csv
+Shutting down, this might take some time.
+Exiting because a job execution failed. Look below for error messages
+[Fri Feb 20 16:15:03 2026]
+Error in rule train_model:
+    message: None
+    jobid: 2
+    input: data/processed/modeling_matrix_with_env.csv, data/processed/geno_merged_raw.csv
+    output: trained_models/final_model.joblib, trained_models/GRM.npy, trained_models/training_pheno_used.csv, trained_models/training_geno_used.csv, trained_models/training_env_used.csv
+    shell:
+        
+        python src/train_model.py
+        
+        (command exited with non-zero exit code)
+Complete log(s): /Users/emilybillow/emilybillow.github.io-8/.snakemake/log/2026-02-20T155218.686357.snakemake.log
+WorkflowError:
+At least one job did not complete successfully.
