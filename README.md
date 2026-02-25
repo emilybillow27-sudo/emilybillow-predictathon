@@ -4,21 +4,22 @@ This repository contains a fully reproducible genomic prediction pipeline develo
 
 ## Features
 
-- Mixed-model BLUP estimation
-- VanRaden genomic relationship matrix
-- Environment-based CV1 cross-validation
-- Challenge-compliant CV0 and CV00 predictions
-- Automatic generation of required submission folder structure
+- Phenotype cleaning and accession harmonization
+- Genotype merging, platform harmonization, and imputation
+- Environmental covariate integration
+- Mixed‑model training with VanRaden GRM
+- Challenge‑compliant CV0 and CV00 predictions
+- Automatic generation of Predictathon submission folders
 
 ## Repository Structure
 
 ```
 data/
-  raw/            # VCFs, raw phenotypes, metadata, accession lists
+  raw/            # VCFs, raw phenotypes, metadata
   processed/      # cleaned phenotypes, merged genotypes, modeling matrices
-diagnostics/      # overlap summaries, missing genotype reports
-src/              # pipeline scripts (VCF merge, modeling matrix, training, prediction)
-trained_models/   # saved GRM and model artifacts
+src/              # pipeline scripts (preprocessing, GRM, training, prediction)
+trained_models/   # saved GRM, imputed genotypes, trained model
+predictathon_submission/   # final submission folders
 Snakefile         # workflow definition
 run_pipeline.sh   # wrapper script
 config.yaml       # trait, trial, and model settings
