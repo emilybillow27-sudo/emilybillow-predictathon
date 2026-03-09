@@ -1,107 +1,153 @@
 ###############################################
-#   T3/Wheat Predictathon — Full Pipeline
+#   T3/Wheat Predictathon — Unified Pipeline
 ###############################################
+
+TRIALS = [
+    "2025_AYT_Aurora",
+    "24Crk_AY2-3",
+    "25_Big6_SVREC_SVREC",
+    "AWY1_DVPWA_2024",
+    "CornellMaster_2025_McGowan",
+    "OHRWW_2025_SPO",
+    "STP1_2025_MCG",
+    "TCAP_2025_MANKS",
+    "YT_Urb_25"
+]
+
+VCF_FILES = {
+    "2025_AYT_Aurora": "GBS_SDSU_2025.fixed.vcf",
+    "24Crk_AY2-3": "GBS_UMN_2020.fixed.vcf",
+    "25_Big6_SVREC_SVREC": "ThermoFisher_AgriSeq_4K.fixed.vcf",
+    "AWY1_DVPWA_2024": "GBS_WSU_2023.vcf",
+    "CornellMaster_2025_McGowan": "GBS_Cornell_2024.vcf",
+    "OHRWW_2025_SPO": "Wheat3K.fullfixed.vcf",
+    "STP1_2025_MCG": "GBS_TAMU_MCG25.fixed.vcf",
+    "TCAP_2025_MANKS": "Allegro_V2.vcf",
+    "YT_Urb_25": "GBS_UIUC_2024.fullfixed.vcf",
+}
 
 rule all:
     input:
+        expand("predictathon_submission/{trial}/submission.csv", trial=TRIALS),
+        expand("results/cv0_predictions/{trial}.csv", trial=TRIALS),
+        expand("results/cv00_predictions/{trial}.csv", trial=TRIALS),
         "predictathon_submission/ALL_DONE.txt"
 
 
-############################################################
-# 1. Extract historical env list
-############################################################
-rule extract_env_list:
+###############################################
+# 1. Extract sample names per trial
+###############################################
+rule extract_samples:
     output:
-        "data/processed/historical_env_list.csv"
+        "results/samples/{trial}.txt"
     shell:
-        "python src/extract_historical_env_list.py"
+        "python -m src.extract_new_samples {wildcards.trial}"
 
 
-############################################################
-# 2. Build historical env metadata
-############################################################
-rule build_env_metadata:
+###############################################
+# 2. Filter VCF to sample list
+###############################################
+rule filter_vcf:
     input:
-        "data/processed/historical_env_list.csv"
+        vcf=lambda wc: f"data/predictathon/{wc.trial}/genotypes/{VCF_FILES[wc.trial]}",
+        samples="results/samples/{trial}.txt"
     output:
-        "data/processed/historical_env_metadata.csv"
+        "data/predictathon/{trial}/genotypes/{trial}_filtered.vcf.gz"
     shell:
-        "python src/build_historical_env_metadata.py"
+        "bcftools view -S {input.samples} -Oz -o {output} {input.vcf}"
 
 
-############################################################
-# 3. Fetch historical weather
-############################################################
-rule fetch_weather:
+###############################################
+# 3. Convert filtered VCF → genotype matrix
+###############################################
+rule vcf_to_matrix:
     input:
-        "data/processed/historical_env_metadata.csv"
+        "data/predictathon/{trial}/genotypes/{trial}_filtered.vcf.gz"
     output:
-        "data/processed/env_historical_standardized.csv"
+        "data/processed/{trial}/geno_matrix.csv"
     shell:
-        "python src/fetch_historical_weather.py"
+        "python -m src.preprocess_genotypes {wildcards.trial}"
 
 
-############################################################
-# 4. Standardize Predictathon env covariates
-############################################################
-rule standardize_predictathon_env:
-    output:
-        "data/processed/env_covariates_standardized.csv"
-    shell:
-        "python src/standardize_env_covariates.py"
-
-
-############################################################
-# 5. Merge env covariates
-############################################################
-rule merge_env:
+###############################################
+# 4. Build GLOBAL GRM (once)
+###############################################
+rule build_global_grm:
     input:
-        hist="data/processed/env_historical_standardized.csv",
-        pred="data/processed/env_covariates_standardized.csv"
+        expand("data/processed/{trial}/geno_matrix.csv", trial=TRIALS)
     output:
-        "data/processed/env_all_standardized.csv"
+        "data/processed/GRM_predictathon.npy",
+        "data/processed/GRM_predictathon_lines.txt"
     shell:
-        "python src/merge_env_covariates.py"
+        "python -m src.build_global_grm"
 
 
-############################################################
-# 6. Preprocess genotypes
-############################################################
-rule preprocess_genotypes:
-    output:
-        "trained_models/geno_numeric_imputed.npy",
-        "trained_models/geno_lines_imputed.pkl"
-    shell:
-        "python src/preprocess_genotypes.py"
-
-
-############################################################
-# 7. Train ME-GBLUP model
-############################################################
+###############################################
+# 5. Train model per trial
+###############################################
 rule train_model:
     input:
-        "trained_models/geno_numeric_imputed.npy",
-        "trained_models/geno_lines_imputed.pkl",
-        "data/processed/env_all_standardized.csv"
+        geno="data/processed/{trial}/geno_matrix.csv",
+        grm="data/processed/GRM_predictathon.npy",
+        pheno="data/processed/unified_training_pheno_mapped.csv"
     output:
-        "trained_models/final_model.joblib",
-        "trained_models/GRM.npy"
+        "trained_models/{trial}/final_model.joblib"
     shell:
-        "python src/train_model.py"
+        "python -m src.train_model {wildcards.trial}"
 
 
-############################################################
-# 8. Build Predictathon submission (CV0 + CV00)
-############################################################
+###############################################
+# 6. CV0 predictions per trial
+###############################################
+rule cv0_predict:
+    input:
+        model="trained_models/{trial}/final_model.joblib",
+        grm="data/processed/GRM_predictathon.npy",
+        pheno="data/processed/unified_training_pheno_mapped.csv"
+    output:
+        "results/cv0_predictions/{trial}.csv"
+    shell:
+        "python -m src.cv0_predict {wildcards.trial}"
+
+
+###############################################
+# 7. CV00 predictions per trial
+###############################################
+rule cv00_predict:
+    input:
+        model="trained_models/{trial}/final_model.joblib",
+        grm="data/processed/GRM_predictathon.npy",
+        pheno="data/processed/unified_training_pheno_mapped.csv"
+    output:
+        "results/cv00_predictions/{trial}.csv"
+    shell:
+        "python -m src.cv00_predict {wildcards.trial}"
+
+
+###############################################
+# 8. Predictathon submission per trial
+###############################################
 rule build_submission:
     input:
-        "trained_models/final_model.joblib",
-        "trained_models/GRM.npy",
-        "data/processed/env_all_standardized.csv"
+        model="trained_models/{trial}/final_model.joblib",
+        grm="data/processed/GRM_predictathon.npy",
+        pheno="data/processed/unified_training_pheno_mapped.csv",
+        geno="data/processed/{trial}/geno_matrix.csv"
+    output:
+        "predictathon_submission/{trial}/submission.csv"
+    shell:
+        "python -m src.build_predictathon_submission {wildcards.trial}"
+
+
+###############################################
+# 9. Final marker
+###############################################
+rule done:
+    input:
+        expand("predictathon_submission/{trial}/submission.csv", trial=TRIALS),
+        expand("results/cv0_predictions/{trial}.csv", trial=TRIALS),
+        expand("results/cv00_predictions/{trial}.csv", trial=TRIALS)
     output:
         "predictathon_submission/ALL_DONE.txt"
     shell:
-        """
-        python src/build_predictathon_submission.py
-        echo 'done' > predictathon_submission/ALL_DONE.txt
-        """
+        "echo 'done' > {output}"
