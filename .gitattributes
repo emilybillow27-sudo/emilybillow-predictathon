@@ -1,12 +1,10 @@
 # Genotype files (large, always LFS)
 *.vcf filter=lfs diff=lfs merge=lfs -text
-*.vcf.gz filter=lfs diff=lfs merge=lfs -text
 
 # Large numeric arrays (always LFS)
 *.npy filter=lfs diff=lfs merge=lfs -text
 *.npz filter=lfs diff=lfs merge=lfs -text
 # Compressed archives (always LFS)
-*.gz filter=lfs diff=lfs merge=lfs -text
 *.zip filter=lfs diff=lfs merge=lfs -text
 # Large model artifacts (always LFS)
 *.joblib filter=lfs diff=lfs merge=lfs -text
