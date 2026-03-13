@@ -1,81 +1,30 @@
-# T3/Wheat Prediction Challenge Pipeline
+# Predictathon 2025 Genomic Prediction Pipeline
+### Author: Emily Billow
+### Institution: Colorado State University
+### Project: GBLUP Pipeline for Predictathon 2025
 
-This repository contains a fully reproducible genomic prediction pipeline developed for the 2026 T3/Wheat Prediction Challenge. All genotype and phenotype data were downloaded directly from T3/Wheat using the website GUI.
-
-## Features
-
-- Phenotype cleaning and accession harmonization
-- Genotype merging, platform harmonization, and imputation
-- Environmental covariate integration
-- Mixed‑model training with VanRaden GRM
-- Challenge‑compliant CV0 and CV00 predictions
-- Automatic generation of Predictathon submission folders
-
-## Repository Structure
-
-```
-data/
-  raw/            # VCFs, raw phenotypes, metadata
-  processed/      # cleaned phenotypes, merged genotypes, modeling matrices
-src/              # pipeline scripts (preprocessing, GRM, training, prediction)
-trained_models/   # saved GRM, imputed genotypes, trained model
-predictathon_submission/   # final submission folders
-Snakefile         # workflow definition
-run_pipeline.sh   # wrapper script
-config.yaml       # trait, trial, and model settings
-```
-
-## Challenge Trials
-
-AWY1_DVPWA_2024  
-TCAP_2025_MANKS  
-25_Big6_SVREC_SVREC  
-OHRWW_2025_SPO  
-CornellMaster_2025_McGowan  
-24Crk_AY2-3  
-2025_AYT_Aurora  
-YT_Urb_25  
-STP1_2025_MCG  
-
-## Running the Pipeline
-```
-bash run_pipeline.sh
-```
-
-## Force a clean rebuild
-```
-bash run_pipeline --clean
-```
-
-Outputs are written to `submission_output/`
-🌾 Predictathon 2025 Genomic Prediction Pipeline
-Author: Emily Billow
-Institution: Colorado State University
-Project: Global GBLUP Pipeline for Predictathon 2025
-Last Updated: March 2026
-
-🌱 Overview
+## Overview
 This repository contains a fully reproducible genomic prediction pipeline developed for the 2025 Wheat Predictathon. The workflow builds a global union genomic relationship matrix (GRM), trains a single global GBLUP model, and generates CV0 and CV00 predictions for all nine Predictathon trials.
 
 The repository is structured for clarity, reproducibility, and long‑term maintainability. All intermediate artifacts, processed data, trained models, and final submission files are preserved.
 
-🌾 Key Features
-Unified phenotype processing across historical and Predictathon datasets
+## Key Features
+- Unified phenotype processing across historical and Predictathon datasets
 
-Global union GRM built from all available genotypes
+- Global union GRM built from all available genotypes
 
-Single global GBLUP model trained on all historical phenotypes
+- Single global GBLUP model trained on all historical phenotypes
 
-True CV0 and CV00 masking, following Predictathon definitions
+- True CV0 and CV00 masking, following Predictathon definitions
 
-Per‑trial predictions for all nine 2025 trials
+- Per‑trial predictions for all nine 2025 trials
 
-Automated submission builder producing Predictathon‑compliant folders
+- Automated submission builder producing Predictathon‑compliant folders
 
-Diagnostic reports for shrinkage, rank correlation, and zero‑prediction behavior
+- Diagnostic reports for shrinkage, rank correlation, and zero‑prediction behavior
 
-📁 Repository Structure
-Code
+## Repository Structure
+```
 emilybillow.github.io-8/
 │
 ├── config.yaml                     # Central configuration for paths & parameters
@@ -118,88 +67,90 @@ emilybillow.github.io-8/
 │           └── CV00_Trials.csv
 │
 └── archive/                        # Safely stored intermediate & redundant outputs
-🌾 Prediction Workflow
-1. Genotype Processing
-VCFs are filtered, encoded, and converted to numeric matrices
+```
+## Prediction Workflow
+### Genotype Processing
 
-Per‑trial GRMs are computed
+- VCFs are filtered, encoded, and converted to numeric matrices
 
-A global union GRM is built from all lines across trials
+- Per‑trial GRMs are computed
 
-2. Phenotype Processing
-Historical phenotypes are cleaned, standardized, and merged
+- A global union GRM is built from all lines across trials
 
-Predictathon trial phenotypes are integrated where allowed
+### Phenotype Processing
 
-Unified phenotype file is produced
+- Historical phenotypes are cleaned, standardized, and merged
 
-3. Model Training
-A single global GBLUP model is trained using the global union GRM
+- Predictathon trial phenotypes are integrated where allowed
 
-Model is saved under trained_models/global_union_model/
+- Unified phenotype file is produced
 
-4. Cross‑Validation (CV0 & CV00)
-CV0: removes phenotypes from the focal trial only
+### Model Training
 
-CV00: removes phenotypes from the focal trial and all accessions in that trial
+- A single global GBLUP model is trained using the global union GRM
 
-Predictions are generated for all nine trials
+- Model is saved under trained_models/global_union_model/
 
-5. Submission Builder
-Converts raw predictions into Predictathon‑compliant structure
+### Cross‑Validation (CV0 & CV00)
 
-Writes:
+- CV0: removes phenotypes from the focal trial only
 
-Predictions
+- CV00: removes phenotypes from the focal trial and all accessions in that trial
 
-Accessions list
+- Predictions are generated for all nine trials
 
-Trials used for training
+### Submission Builder
 
-🌱 Interpreting Zero Predictions
+- Converts raw predictions into Predictathon‑compliant structure
+
+- Writes: Predictions, Accessions list, Trials used for training
+
+## Interpreting Zero Predictions
 Some trials (notably 24Crk_AY2‑3) contain accessions that:
 
-appear only in that trial
+- appear only in that trial
 
-have no phenotypes in any other environment
+- have no phenotypes in any other environment
 
-have no close genomic relatives with phenotypes
+- have no close genomic relatives with phenotypes
 
 Under true CV0/CV00 masking, these lines have no usable training information, so their GBLUP breeding values correctly shrink to 0, and predicted yield shrinks to the global mean.
 
 This is a data limitation, not a model failure.
 
-📦 Final Submission
+## Final Submission
 The final Predictathon submission is located in:
 
-Code
+```
 submission/
+```
 Each trial contains:
 
-CV0/ and CV00/
+- CV0/ and CV00/
 
-Predictions
+- Predictions
 
-Accessions list
+- Accessions list
 
-Trials used for training
+- Trials used for training
 
 This structure is fully compliant with Predictathon requirements.
 
-🧪 Reproducibility
+## Reproducibility
 To rerun the entire pipeline:
 
-Code
+```
 bash run_pipeline.sh
+```
 Or run CV predictions only:
-
-Code
+```
 python run_all_cv.py
+```
 To rebuild the submission folder:
-
-Code
+```
 python src/submission/build_submission.py
-🌻 Contact
+```
+## Contact
 For questions or collaboration:
 Emily Billow  
 Graduate Research Assistant
