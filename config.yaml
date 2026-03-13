@@ -14,11 +14,49 @@ focal_trials:
   - YT_Urb_25
   - STP1_2025_MCG
 
+# --------------------------------------------
 # Trait configuration
+# --------------------------------------------
 traits:
-  target_trait: value   # column name in train_pheno_overlap.csv
+  target_trait: value   # column name in unified_training_pheno_cleaned.csv
 
+# --------------------------------------------
 # Model configuration
+# --------------------------------------------
 model:
   use_ml: false         # use RR-BLUP / GBLUP
   lambda_factor: 1e-5   # ridge penalty scaling
+
+# --------------------------------------------
+# Paths used by the pipeline
+# --------------------------------------------
+paths:
+  # Where processed phenotype + env files live
+  processed_data: data/processed
+
+  # Predictathon trial directories
+  predictathon_root: data/predictathon
+
+  # Where per-trial models were stored (legacy compatibility)
+  trained_models_root: trained_models
+
+  # Global GRM + global genotype matrix directory
+  global_union_root: data/processed/global_union
+
+  # Global model directory (legacy compatibility)
+  global_model_root: trained_models/global_union_model
+
+  # Output directories
+  results_root: results
+  cv0_predictions: results/cv0_predictions_yield
+  cv00_predictions: results/cv00_predictions_yield
+  expected_accuracy: results/expected_accuracy
+
+  # NEW: Where the driver writes final CV0/CV00 outputs
+  submission_root: submission_output
+
+# --------------------------------------------
+# Unified phenotype file (training only)
+# --------------------------------------------
+phenotypes:
+  unified_training: data/processed/unified_training_pheno_cleaned.csv

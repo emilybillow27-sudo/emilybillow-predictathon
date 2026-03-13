@@ -1,130 +1,149 @@
 #!/usr/bin/env python3
 
-import os
-import pandas as pd
+import argparse
+import pathlib
+import yaml
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
+import pandas as pd
+import joblib
+import sys
+from pathlib import Path
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Ensure repo root is on PYTHONPATH so joblib can import src.model.models
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-# -----------------------------
-# Load data
-# -----------------------------
-env = pd.read_csv(f"{ROOT}/data/processed/env_covariates_standardized.csv")
-pheno = pd.read_csv(f"{ROOT}/data/processed/unified_training_pheno_mapped.csv")
 
-pheno["trial"] = pheno["trial"].astype(str)
+def load_config(path):
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
 
-# Predictathon trials (from your repo)
-PRED_TRIALS = [
-    "2025_AYT_Aurora",
-    "24Crk_AY2-3",
-    "25_Big6_SVREC_SVREC",
-    "AWY1_DVPWA_2024",
-    "CornellMaster_2025_McGowan",
-    "OHRWW_2025_SPO",
-    "STP1_2025_MCG",
-    "TCAP_2025_MANKS",
-    "YT_Urb_25"
-]
 
-# -----------------------------
-# Helper: get genotype sets
-# -----------------------------
-def load_genotypes_for_trial(trial):
-    path = f"{ROOT}/results/samples/{trial}.txt"
-    if not os.path.exists(path):
-        return set()
-    with open(path) as f:
-        return set([x.strip() for x in f.readlines()])
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default="config.yaml")
+    parser.add_argument("--trial", type=str, required=True)
+    parser.add_argument("--out", type=str, required=True)
+    args = parser.parse_args()
 
-geno_predictathon = {t: load_genotypes_for_trial(t) for t in PRED_TRIALS}
+    # ---------------------------------------------------------
+    # Load config + paths
+    # ---------------------------------------------------------
+    config = load_config(args.config)
+    paths = config["paths"]
 
-# Historical trials = all trials in phenotype file
-HIST_TRIALS = sorted(pheno["trial"].unique())
+    trained_models_root = pathlib.Path(paths["trained_models_root"])
+    unified_pheno_path = pathlib.Path(config["phenotypes"]["unified_training"])
 
-# Build genotype sets for historical trials
-geno_historical = {
-    t: set(pheno.loc[pheno["trial"] == t, "germplasmName_mapped"])
-    for t in HIST_TRIALS
-}
+    trial = args.trial
+    out_path = pathlib.Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
-# -----------------------------
-# Climate similarity matrix
-# -----------------------------
-env_indexed = env.set_index("trial")
-env_matrix = env_indexed.values
-env_trials = env_indexed.index.tolist()
+    # ---------------------------------------------------------
+    # Load unified phenotype file
+    # ---------------------------------------------------------
+    if not unified_pheno_path.exists():
+        raise SystemExit(f"Unified phenotype file not found: {unified_pheno_path}")
 
-# Cosine similarity across all trials
-clim_sim_matrix = cosine_similarity(env_matrix)
+    pheno = pd.read_csv(unified_pheno_path, low_memory=False)
 
-# Convert to DataFrame for easy lookup
-clim_sim = pd.DataFrame(
-    clim_sim_matrix,
-    index=env_trials,
-    columns=env_trials
-)
+    # Identify trial column
+    trial_cols = [
+        c for c in pheno.columns
+        if "trial" in c.lower() or "study" in c.lower()
+    ]
+    if not trial_cols:
+        raise SystemExit("Could not infer trial column in unified phenotype file.")
+    trial_col = trial_cols[0]
 
-# -----------------------------
-# Historical signal strength
-# -----------------------------
-signal_strength = (
-    pheno.groupby("trial")["value"]
-    .agg(lambda x: np.nanstd(pd.to_numeric(x, errors="coerce")))
-)
+    # Subset to this trial
+    ph = pheno[pheno[trial_col] == trial].copy()
 
-# -----------------------------
-# Expected accuracy calculation
-# -----------------------------
-rows = []
+    # If no phenotypes → expected accuracy not applicable
+    if ph.empty:
+        df = pd.DataFrame({
+            "trial": [trial],
+            "expected_accuracy": ["not_applicable"]
+        })
+        df.to_csv(out_path, index=False)
+        print(f"[expected_accuracy] No phenotypes for {trial} → not_applicable")
+        return
 
-for p in PRED_TRIALS:
-    if p not in clim_sim.index:
-        print(f"Warning: no env covariates for {p}")
-        continue
+    # Standardize accession column
+    if "germplasm_name" in ph.columns:
+        ph = ph.rename(columns={"germplasm_name": "germplasmName"})
+    if "germplasmName" not in ph.columns:
+        raise SystemExit("Unified phenotype file must contain 'germplasmName'.")
 
-    gp = geno_predictathon[p]
+    # Ensure numeric phenotype
+    if "value" not in ph.columns:
+        raise SystemExit("Unified phenotype file must contain a 'value' column.")
 
-    numer = 0.0
-    denom = 0.0
+    ph["value"] = pd.to_numeric(ph["value"], errors="coerce")
+    ph = ph.dropna(subset=["value"])
 
-    for h in HIST_TRIALS:
-        if h not in clim_sim.index:
-            continue
+    # ---------------------------------------------------------
+    # Load model
+    # ---------------------------------------------------------
+    model_path = trained_models_root / trial / "final_model.joblib"
+    if not model_path.exists():
+        raise SystemExit(f"Model not found: {model_path}")
 
-        # Climate similarity
-        S_clim = clim_sim.loc[p, h]
+    model = joblib.load(model_path)
 
-        # Genotype overlap (Jaccard)
-        gh = geno_historical[h]
-        if len(gp | gh) == 0:
-            S_geno = 0
-        else:
-            S_geno = len(gp & gh) / len(gp | gh)
+    # ---------------------------------------------------------
+    # Load GRM + line order
+    # ---------------------------------------------------------
+    grm_path = trained_models_root / trial / "GRM.npy"
+    lines_path = trained_models_root / trial / "GRM_lines.txt"
 
-        # Historical signal
-        A_signal = signal_strength.get(h, np.nan)
-        if np.isnan(A_signal):
-            continue
+    if not grm_path.exists():
+        raise SystemExit(f"GRM not found: {grm_path}")
+    if not lines_path.exists():
+        raise SystemExit(f"GRM_lines.txt not found: {lines_path}")
 
-        weight = S_clim * S_geno
+    G = np.load(grm_path)
+    with open(lines_path, "r") as f:
+        lines = [ln.strip() for ln in f if ln.strip()]
 
-        numer += weight * A_signal
-        denom += weight
+    # ---------------------------------------------------------
+    # Compute predictions for all lines
+    # ---------------------------------------------------------
+    if hasattr(model, "predict_from_grm"):
+        u_hat = model.predict_from_grm(G)
+    else:
+        u_hat = model.predict(G)
 
-    expected_acc = numer / denom if denom > 0 else np.nan
+    # ---------------------------------------------------------
+    # Align phenotype with model line order
+    # ---------------------------------------------------------
+    ph_map = dict(zip(ph["germplasmName"], ph["value"]))
+    y = np.array([ph_map.get(ln, np.nan) for ln in lines])
 
-    rows.append({
-        "predictathon_trial": p,
-        "expected_accuracy": expected_acc
+    mask = ~np.isnan(y)
+    if mask.sum() == 0:
+        df = pd.DataFrame({
+            "trial": [trial],
+            "expected_accuracy": ["not_applicable"]
+        })
+        df.to_csv(out_path, index=False)
+        print(f"[expected_accuracy] No overlapping phenotype lines for {trial} → not_applicable")
+        return
+
+    # ---------------------------------------------------------
+    # Compute expected accuracy = corr(u_hat, y)
+    # ---------------------------------------------------------
+    corr = np.corrcoef(u_hat[mask], y[mask])[0, 1]
+
+    df = pd.DataFrame({
+        "trial": [trial],
+        "expected_accuracy": [float(corr)]
     })
+    df.to_csv(out_path, index=False)
 
-# -----------------------------
-# Save output
-# -----------------------------
-out = pd.DataFrame(rows)
-out_path = f"{ROOT}/results/expected_accuracy.csv"
-out.to_csv(out_path, index=False)
+    print(f"[expected_accuracy] {trial}: expected_accuracy = {corr:.4f}")
 
-print(f"Expected accuracy saved → {out_path}")
+
+if __name__ == "__main__":
+    main()

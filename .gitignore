@@ -25,20 +25,39 @@ __pycache__/
 *.snakemake_timestamp
 
 ###############################################
-# Model artifacts (per-trial)
+# Logs / temp files
 ###############################################
-trained_models/
+*.log
+*.tmp
+*.bak
 
 ###############################################
-# Results (predictions, submissions)
+# Model artifacts (generated)
 ###############################################
-results/
-predictathon_submission/
+trained_models/*/
+!trained_models/.gitkeep
 
 ###############################################
-# Processed data (all generated)
+# Results (generated predictions)
 ###############################################
-data/processed/
+results/*/
+!results/.gitkeep
+
+###############################################
+# Predictathon submission outputs (generated)
+###############################################
+submission/*/
+!submission/.gitkeep
+
+###############################################
+# Processed data (generated)
+###############################################
+data/processed/*/
+!data/processed/.gitkeep
+
+# Allow global GRM folder to be tracked if needed
+!data/processed/global/
+!data/processed/global/*.txt
 
 ###############################################
 # Filtered VCFs (generated)
@@ -47,8 +66,8 @@ data/predictathon/*/genotypes/*_filtered.vcf.gz
 data/predictathon/*/genotypes/*_filtered.vcf.gz.tbi
 
 ###############################################
-# Logs / temp files
+# Large intermediate genotype matrices (old pipeline)
 ###############################################
-*.log
-*.tmp
-*.bak
+data/predictathon/*/processed/geno_*.npy
+data/predictathon/*/processed/geno_*.csv
+data/predictathon/*/processed/GRM.npy

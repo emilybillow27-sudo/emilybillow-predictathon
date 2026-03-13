@@ -6,23 +6,37 @@ import numpy as np
 import pandas as pd
 
 
-# ---------------------------------------------------------
+# =========================================================
 # GRM builder (VanRaden-like)
-# ---------------------------------------------------------
+# =========================================================
 
 def build_grm_from_geno(geno_numeric):
     """
-    geno_numeric: numeric-only genotype matrix (rows = lines, cols = markers)
-    Accepts either a pandas DataFrame or a NumPy array.
-    Returns a NumPy GRM (lines × lines).
+    Build a VanRaden-like genomic relationship matrix (GRM).
+
+    Parameters
+    ----------
+    geno_numeric : pandas.DataFrame or numpy.ndarray
+        Genotype dosage matrix with shape (n_lines, n_markers).
+        Values should be 0/1/2 or NaN.
+
+    Returns
+    -------
+    G : numpy.ndarray
+        GRM of shape (n_lines, n_lines).
     """
+
     # Convert to NumPy
     if hasattr(geno_numeric, "to_numpy"):
         X = geno_numeric.to_numpy(dtype=float)
     else:
         X = np.asarray(geno_numeric, dtype=float)
 
-    # Impute missing with column means
+    n_lines, n_markers = X.shape
+    if n_markers == 0:
+        raise ValueError("Genotype matrix has zero markers.")
+
+    # Impute missing values with column means
     col_means = np.nanmean(X, axis=0)
     inds = np.where(np.isnan(X))
     if inds[0].size > 0:
@@ -31,10 +45,9 @@ def build_grm_from_geno(geno_numeric):
     # Remove monomorphic markers
     std = X.std(axis=0)
     keep = std > 0
-    X = X[:, keep]
-
-    if X.shape[1] == 0:
+    if keep.sum() == 0:
         raise ValueError("All markers are monomorphic after filtering.")
+    X = X[:, keep]
 
     # Center markers
     X_centered = X - X.mean(axis=0, keepdims=True)
@@ -46,115 +59,146 @@ def build_grm_from_geno(geno_numeric):
     return G
 
 
-# ---------------------------------------------------------
-# Simple GBLUP (single-environment, per-trial)
-# ---------------------------------------------------------
+# =========================================================
+# GBLUP model class
+# =========================================================
+
+class GBLUPModel:
+    """
+    A lightweight, joblib‑serializable GBLUP model wrapper.
+
+    Stores:
+      - u_hat: breeding values in the same order as geno_lines
+      - lines: list of germplasm names
+    """
+
+    def __init__(self, u_hat, lines):
+        self.u_hat = np.asarray(u_hat)
+        self.lines = list(lines)
+
+    def predict(self, G):
+        """
+        Standard prediction interface.
+        For GBLUP, predictions are simply u_hat for each line.
+        """
+        return self.u_hat
+
+    def predict_from_grm(self, G):
+        """
+        Some pipelines call this explicitly.
+        We return u_hat regardless of G, since GBLUP predictions
+        are already encoded in u_hat.
+        """
+        return self.u_hat
+
+
+# =========================================================
+# Core fit_model function (clean, unified)
+# =========================================================
 
 def fit_model(train_pheno, geno_numeric, geno_lines, G, model_type="gblup"):
     """
-    train_pheno: DataFrame with ['germplasmName','value'] (single trial)
-    geno_numeric: numeric-only genotype matrix (rows = geno_lines)
-    geno_lines: list of germplasm names in same order as geno_numeric rows
-    G: GRM as a NumPy array with rows/cols in the same order as geno_lines
+    Fit a GBLUP model using the full solution:
+        u = G (G_mm + λI)^(-1) y_m
+    where:
+        - G is the full GRM for all lines
+        - G_mm is the submatrix for lines with phenotypes
+        - y_m is the phenotype vector for those lines
+
+    Returns a GBLUPModel with u_hat for ALL geno_lines.
     """
 
-    df = train_pheno.copy()
+    n_lines = len(geno_lines)
 
-    if "germplasmName" not in df.columns or "value" not in df.columns:
-        raise ValueError("train_pheno must contain 'germplasmName' and 'value'.")
+    # -----------------------------------------------------
+    # Phenotype‑optional mode
+    # -----------------------------------------------------
+    if train_pheno is None or len(train_pheno) == 0:
+        u_hat = np.zeros(n_lines)
+        return GBLUPModel(u_hat=u_hat, lines=geno_lines)
 
-    # Aggregate to line means (one value per line)
-    line_means = (
-        df.groupby("germplasmName")["value"]
-        .mean()
-        .reset_index()
-    )
+    # -----------------------------------------------------
+    # Align phenotype with genotype lines
+    # -----------------------------------------------------
+    ph = train_pheno.copy()
+    ph = ph[ph["germplasmName"].isin(geno_lines)]
 
-    train_lines = line_means["germplasmName"].tolist()
-    y = line_means["value"].astype(float).to_numpy()
-    y_mean = y.mean()
-    y_centered = y - y_mean
+    pheno_map = dict(zip(ph["germplasmName"], ph["value"]))
+    y = np.array([pheno_map.get(line, np.nan) for line in geno_lines])
 
-    # Map lines to indices in geno_lines / G
-    idx_map = {name: i for i, name in enumerate(geno_lines)}
-    train_idx = []
-    for ln in train_lines:
-        if ln not in idx_map:
-            raise ValueError(f"Line '{ln}' not found in geno_lines.")
-        train_idx.append(idx_map[ln])
-    train_idx = np.array(train_idx, dtype=int)
+    mask = ~np.isnan(y)
+    if mask.sum() == 0:
+        u_hat = np.zeros(n_lines)
+        return GBLUPModel(u_hat=u_hat, lines=geno_lines)
 
-    # Subset GRM to training lines
-    G_train = G[np.ix_(train_idx, train_idx)]
+    # Lines with phenotypes
+    y_m = y[mask]
+    G_mm = G[np.ix_(mask, mask)]          # phenotyped × phenotyped
+    G_all_m = G[:, mask]                  # all lines × phenotyped
 
-    # Ridge parameter
-    lambda_ridge = 1.0
-    K = G_train + lambda_ridge * np.eye(G_train.shape[0])
+    # -----------------------------------------------------
+    # Full GBLUP solution: u = G_all_m (G_mm + λI)^(-1) y_m
+    # -----------------------------------------------------
+    lam = 1e-5
+    A = G_mm + lam * np.eye(G_mm.shape[0])
+    alpha = np.linalg.solve(A, y_m)       # (G_mm + λI)^(-1) y_m
 
-    try:
-        u = np.linalg.solve(K, y_centered)
-    except np.linalg.LinAlgError:
-        u = np.linalg.lstsq(K, y_centered, rcond=None)[0]
+    u_hat = G_all_m @ alpha               # breeding values for ALL lines
 
-    return {
-        "train_lines": train_lines,
-        "train_idx": train_idx,
-        "u": u,
-        "geno_lines": geno_lines,
-        "G": G,
-        "y_mean": y_mean,
-        "lambda_ridge": lambda_ridge,
-    }
+    return GBLUPModel(u_hat=u_hat, lines=geno_lines)
 
-
-# ---------------------------------------------------------
-# Prediction (per-trial)
-# ---------------------------------------------------------
+# =========================================================
+# Prediction (kept for compatibility)
+# =========================================================
 
 def predict_for_trial(model, focal_trial, test_accessions, geno_numeric, geno_lines, env, G, model_type="gblup"):
     """
-    Per-trial prediction using the GRM.
-    env and focal_trial are unused here but kept for interface compatibility.
+    Predict breeding values for test_accessions using the fitted GBLUPModel.
+    All lines have non‑zero u_hat from the full GBLUP solution.
     """
 
-    u = model["u"]
-    train_lines = model["train_lines"]
-    train_idx = model["train_idx"]
-    y_mean = model["y_mean"]
-    G_full = model["G"]
-    all_lines = model["geno_lines"]
+    if isinstance(model, GBLUPModel):
+        u_hat = model.u_hat
+        line_index = {ln: i for i, ln in enumerate(model.lines)}
 
-    # Map all lines to indices
-    idx_map = {name: i for i, name in enumerate(all_lines)}
+        preds = []
+        for acc in test_accessions:
+            idx = line_index.get(acc, None)
+            if idx is None:
+                preds.append(0.0)
+            else:
+                preds.append(u_hat[idx])
 
-    # Build G_test_train: test × train
-    G_test_train = []
-    for acc in test_accessions:
-        if acc in idx_map:
-            i = idx_map[acc]
-            row = G_full[i, train_idx]
-        else:
-            row = np.zeros(len(train_idx))
-        G_test_train.append(row)
-    G_test_train = np.array(G_test_train)
+        return pd.DataFrame({
+            "germplasmName": test_accessions,
+            "pred": preds
+        })
 
-    g_hat = G_test_train @ u
-    y_hat = y_mean + g_hat
+    # Legacy dict path (if still needed)
+    if isinstance(model, dict):
+        u = model["u"]
+        geno_lines_model = model["geno_lines"]
+        line_index = {ln: i for i, ln in enumerate(geno_lines_model)}
 
-    return pd.DataFrame({
-        "germplasmName": test_accessions,
-        "pred": y_hat
-    })
+        preds = []
+        for acc in test_accessions:
+            idx = line_index.get(acc, None)
+            preds.append(u[idx] if idx is not None else 0.0)
 
+        return pd.DataFrame({
+            "germplasmName": test_accessions,
+            "pred": preds
+        })
 
-# ---------------------------------------------------------
-# Optional: simple CV over lines within a trial
-# ---------------------------------------------------------
+    raise TypeError("Model must be GBLUPModel or legacy dict model.")
+
+# =========================================================
+# Simple CV (unchanged, but now uses GBLUPModel)
+# =========================================================
 
 def cross_validate_model(train_pheno, geno_numeric, geno_lines, env, G, model_type="gblup", n_folds=5):
     """
     Simple CV over lines within a single trial.
-    Splits lines into folds, trains on (n_folds-1)/n_folds, predicts on held-out lines.
     """
 
     if "germplasmName" not in train_pheno.columns or "value" not in train_pheno.columns:
@@ -211,24 +255,29 @@ def cross_validate_model(train_pheno, geno_numeric, geno_lines, env, G, model_ty
     return pd.concat(results, ignore_index=True)
 
 
-# ---------------------------------------------------------
+# =========================================================
 # CLI: build GRM for a trial
-# ---------------------------------------------------------
+# =========================================================
 
 def _cli_build_grm(trial):
-    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    geno_path = f"{ROOT}/data/processed/{trial}/geno_matrix.csv"
-    outdir = f"{ROOT}/trained_models/{trial}"
+    ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+    geno_path = f"{ROOT}/data/predictathon/{trial}/processed/geno_matrix.csv"
+    outdir = f"{ROOT}/data/predictathon/{trial}/processed"
     os.makedirs(outdir, exist_ok=True)
-    outpath = f"{outdir}/GRM.npy"
 
     if not os.path.exists(geno_path):
         raise SystemExit(f"Genotype matrix not found: {geno_path}")
 
+    print(f"[models] Loading genotype matrix for {trial}...")
     geno_df = pd.read_csv(geno_path, index_col=0)
+
+    print(f"[models] Building GRM for {trial}...")
     G = build_grm_from_geno(geno_df)
 
+    outpath = f"{outdir}/GRM.npy"
     np.save(outpath, G)
+
     print(f"[models] {trial}: GRM saved → {outpath}")
     print(f"[models] GRM shape: {G.shape}")
 
@@ -238,7 +287,7 @@ def main():
         trial = sys.argv[2]
         _cli_build_grm(trial)
     else:
-        raise SystemExit("Usage: python -m src.models build_grm <TRIAL>")
+        raise SystemExit("Usage: python -m src.model.models build_grm <TRIAL>")
 
 
 if __name__ == "__main__":

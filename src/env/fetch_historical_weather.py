@@ -5,13 +5,11 @@ import subprocess
 from pathlib import Path
 
 # Input metadata file you created
-INPUT_FILE = Path("data/processed/historical_env_metadata_completed.csv")
-
-# Output file for all weather rows
-OUTPUT_FILE = Path("data/processed/env_historical.csv")
+INPUT_FILE = Path("data/processed/pnw_env_metadata.csv")
+OUTPUT_FILE = Path("data/processed/env_pnw.csv")
 
 # Absolute path to curl wrapper
-CURL_WRAPPER = Path(__file__).resolve().parent.parent / "fetch_weather.sh"
+CURL_WRAPPER = Path(__file__).resolve().parent / "fetch_weather.sh"
 
 # NASA POWER parameters
 PARAMS = ",".join([

@@ -1,94 +1,170 @@
 #!/usr/bin/env python3
 
+import argparse
 import os
 import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import joblib
+import yaml
 
-from src.models import fit_model
+from src.model.models import fit_model
 
+
+# ---------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------
+
+def load_config(path: Path) -> dict:
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("trial", type=str, help="Predictathon trial name")
+    parser.add_argument("--config", type=str, default="config.yaml")
+    return parser.parse_args()
+
+
+def subset_pheno_for_trial(unified_pheno: pd.DataFrame, trial: str) -> pd.DataFrame:
+    """
+    Subset unified_training_pheno_mapped.csv to rows belonging to this trial.
+    We detect the trial column automatically.
+    """
+    trial_cols = [
+        c for c in unified_pheno.columns
+        if "trial" in c.lower() or "study" in c.lower()
+    ]
+    if not trial_cols:
+        raise ValueError("Could not infer trial column in unified phenotype file.")
+
+    trial_col = trial_cols[0]
+    return unified_pheno[unified_pheno[trial_col] == trial].copy()
+
+
+# ---------------------------------------------------------
+# Main
+# ---------------------------------------------------------
 
 def main():
-    if len(sys.argv) < 2:
-        raise SystemExit("Usage: python -m src.train_model <TRIAL>")
+    args = parse_args()
+    trial = args.trial
 
-    trial = sys.argv[1]
+    # Load config
+    config = load_config(Path(args.config))
+    paths = config["paths"]
 
-    print("\n==============================")
-    print(f"   TRAIN MODEL — {trial}")
-    print("==============================\n")
+    predictathon_root = Path(paths["predictathon_root"])
+    trained_models_root = Path(paths["trained_models_root"])
+    unified_pheno_path = Path(config["phenotypes"]["unified_training"])
 
-    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Trial directories
+    trial_raw_dir = predictathon_root / trial
+    trial_proc_dir = trial_raw_dir / "processed"
+    outdir = trained_models_root / trial
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\nTraining model for {trial}\n")
 
     # ---------------------------------------------------------
-    # Load global modeling matrix
+    # Load unified phenotype file
     # ---------------------------------------------------------
-    mm_path = f"{ROOT}/data/processed/modeling_matrix.csv"
-    if not os.path.exists(mm_path):
-        raise SystemExit(f"Modeling matrix not found: {mm_path}")
+    if not unified_pheno_path.exists():
+        raise SystemExit(f"Unified phenotype file not found: {unified_pheno_path}")
 
-    mm = pd.read_csv(mm_path)
-    print(f"✓ Loaded modeling matrix: {mm.shape[0]} rows")
+    unified_pheno = pd.read_csv(unified_pheno_path, low_memory=False)
 
-    # Filter to this trial
-    pheno = mm[mm["studyName"] == trial].copy()
+    # Subset to this trial
+    pheno = subset_pheno_for_trial(unified_pheno, trial)
+
     if pheno.empty:
-        raise SystemExit(f"No phenotype rows found for trial: {trial}")
+        print(f"[train_model] No phenotype rows found for {trial}.")
+        print("[train_model] This trial will still produce a model using genotype-only structure.")
+        # We allow pheno to be empty — model fitting will handle it.
+    else:
+        # Standardize accession column
+        if "germplasm_name" in pheno.columns:
+            pheno = pheno.rename(columns={"germplasm_name": "germplasmName"})
+        elif "germplasmName" not in pheno.columns:
+            raise SystemExit("Unified phenotype file must contain 'germplasm_name' or 'germplasmName'.")
 
-    print(f"✓ Trial phenotype rows: {pheno.shape[0]}")
+        # Ensure numeric phenotype
+        if "value" not in pheno.columns:
+            raise SystemExit("Unified phenotype file must contain a 'value' column.")
+
+        pheno["value"] = pd.to_numeric(pheno["value"], errors="coerce")
+        bad = pheno["value"].isna().sum()
+        if bad > 0:
+            print(f"[train_model] Warning: Dropping {bad} rows with non-numeric phenotype values.")
+            pheno = pheno.dropna(subset=["value"])
+
+        print(f"✓ Loaded phenotype: {pheno.shape[0]} rows, "
+              f"{pheno['germplasmName'].nunique()} unique lines")
 
     # ---------------------------------------------------------
-    # Load global GRM and subset
+    # Load genotype
     # ---------------------------------------------------------
-    grm_path = f"{ROOT}/data/processed/GRM.npy"
-    lines_path = f"{ROOT}/data/processed/GRM_lines.txt"
+    geno_numeric_path = trial_proc_dir / "geno_numeric.npy"
+    geno_lines_path = trial_proc_dir / "geno_lines.npy"
 
-    if not os.path.exists(grm_path):
-        raise SystemExit(f"Global GRM not found: {grm_path}")
-    if not os.path.exists(lines_path):
-        raise SystemExit(f"Global GRM line list not found: {lines_path}")
+    if not geno_numeric_path.exists():
+        raise SystemExit(f"Genotype numeric matrix not found: {geno_numeric_path}")
+    if not geno_lines_path.exists():
+        raise SystemExit(f"Genotype line list not found: {geno_lines_path}")
 
-    G_full = np.load(grm_path)
-    lines_full = np.genfromtxt(lines_path, dtype=str, delimiter="\n")
+    geno_numeric = np.load(geno_numeric_path)
+    geno_lines = np.load(geno_lines_path, allow_pickle=True).tolist()
 
-    # Lines in this trial
-    trial_lines = pheno["germplasmName"].unique()
+    print(f"✓ Loaded genotype: {len(geno_lines)} lines × {geno_numeric.shape[1]} markers")
 
-    # Subset GRM
-    mask = np.isin(lines_full, trial_lines)
-    G_sub = G_full[mask][:, mask]
+    # ---------------------------------------------------------
+    # Load GRM
+    # ---------------------------------------------------------
+    grm_path = trial_proc_dir / "GRM.npy"
+    if not grm_path.exists():
+        raise SystemExit(f"GRM not found: {grm_path}")
 
-    # Keep line order for model
-    geno_lines = lines_full[mask].tolist()
+    G = np.load(grm_path)
+    print(f"✓ Loaded GRM: {G.shape}")
 
-    print(f"✓ Trial GRM: {G_sub.shape}")
+    # ---------------------------------------------------------
+    # Save GRM + GRM lines for CV0/CV00
+    # ---------------------------------------------------------
+    out_grm_path = outdir / "GRM.npy"
+    np.save(out_grm_path, G)
+
+    out_lines_path = outdir / "GRM_lines.txt"
+    with open(out_lines_path, "w") as f:
+        for g in geno_lines:
+            f.write(g + "\n")
+
+    print(f"✓ Saved GRM → {out_grm_path}")
+    print(f"✓ Saved GRM lines → {out_lines_path}")
 
     # ---------------------------------------------------------
     # Fit model
     # ---------------------------------------------------------
-    print("\n=== Fitting model ===")
+    print("\nFitting model...")
 
     model = fit_model(
-        train_pheno=pheno,
-        geno_numeric=None,      # no genotype matrix needed
+        train_pheno=pheno if not pheno.empty else None,
+        geno_numeric=geno_numeric,
         geno_lines=geno_lines,
-        G=G_sub,
-        model_type="me_gblup"
+        G=G,
+        model_type="gblup"
     )
 
     # ---------------------------------------------------------
-    # Save outputs
+    # Save model
     # ---------------------------------------------------------
-    outdir = f"{ROOT}/trained_models/{trial}"
-    os.makedirs(outdir, exist_ok=True)
+    model_path = outdir / "final_model.joblib"
+    joblib.dump(model, model_path)
 
-    joblib.dump(model, f"{outdir}/final_model.joblib")
-    np.save(f"{outdir}/GRM.npy", G_sub)
-
-    print(f"✓ Saved model → {outdir}/final_model.joblib")
-    print(f"✓ Saved GRM   → {outdir}/GRM.npy")
-    print("\n✓ Training complete.\n")
+    print(f"✓ Saved model → {model_path}")
+    print("✓ Training complete.\n")
 
 
 if __name__ == "__main__":

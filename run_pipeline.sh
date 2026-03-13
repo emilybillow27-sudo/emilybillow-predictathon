@@ -2,84 +2,76 @@
 set -euo pipefail
 
 echo "======================================"
-echo "   T3/Wheat Predictathon Pipeline"
+echo "  T3/Wheat Predictathon Pipeline"
 echo "======================================"
 
-# --------------------------------------------------
-# Cleaning option
-# --------------------------------------------------
-if [[ "${1:-}" == "--clean" ]]; then
-    echo "Cleaning workspace..."
+TRIALS=(
+    AWY1_DVPWA_2024
+    TCAP_2025_MANKS
+    25_Big6_SVREC_SVREC
+    OHRWW_2025_SPO
+    CornellMaster_2025_McGowan
+    24Crk_AY2-3
+    2025_AYT_Aurora
+    YT_Urb_25
+    STP1_2025_MCG
+)
 
-    rm -rf data/processed
-    rm -rf trained_models
-    rm -rf results
-    rm -rf predictathon_submission
-
-    echo "Clean-all complete."
-    exit 0
-fi
-
-# --------------------------------------------------
-# Optional: accuracy flag
-# --------------------------------------------------
-WITH_ACC=false
-if [[ "${1:-}" == "--with-accuracy" ]]; then
-    WITH_ACC=true
-fi
-
-# --------------------------------------------------
-# Step 1: Environment pipeline (cached)
-# --------------------------------------------------
-echo ""
-echo "======================================"
-echo " Step 1: Environment pipeline (cached)"
-echo "======================================"
-
-HIST_WEATHER=data/processed/env_historical_standardized.csv
-
-if [[ -f "$HIST_WEATHER" ]]; then
-    echo "✓ Historical weather already exists — skipping weather fetch."
-else
-    echo "Building historical env list + metadata..."
-    python src/extract_historical_env_list.py
-    python src/build_historical_env_metadata.py
-
-    echo "Fetching historical weather..."
-    python src/fetch_historical_weather.py
-fi
-
-echo "Standardizing Predictathon envs..."
-python src/standardize_env_covariates.py
-
-echo "Merging environment covariates..."
-python src/merge_env_covariates.py
-
-# --------------------------------------------------
-# Step 2: Run Snakemake pipeline
-# --------------------------------------------------
-echo ""
-echo "======================================"
-echo " Step 2: Running Snakemake pipeline"
-echo "======================================"
-
-snakemake -j 8 --rerun-incomplete --keep-going
-
-# --------------------------------------------------
-# Step 3: Optional expected accuracy
-# --------------------------------------------------
-if [[ "$WITH_ACC" == true ]]; then
+for trial in "${TRIALS[@]}"; do
     echo ""
     echo "======================================"
-    echo " Step 3: Compute expected accuracy"
+    echo "Processing trial: $trial"
     echo "======================================"
-    python src/compute_expected_accuracy.py
-fi
 
-# --------------------------------------------------
-# Done
-# --------------------------------------------------
+    PROC_DIR="data/predictathon/$trial/processed"
+    GRM_PATH="$PROC_DIR/GRM.npy"
+
+    # ---------------------------------------------------------
+    # Step 1 — Preprocess genotypes (only if needed)
+    # ---------------------------------------------------------
+    if [ ! -f "$GRM_PATH" ]; then
+        echo "[pipeline] No GRM found — preprocessing genotypes for $trial"
+        python -m src.genotypes.preprocess_genotypes "$trial"
+    else
+        echo "[pipeline] GRM already exists — skipping genotype preprocessing"
+    fi
+
+    # ---------------------------------------------------------
+    # Step 2 — Train model
+    # ---------------------------------------------------------
+    echo "[pipeline] Training model for $trial"
+    python -m src.model.train_model "$trial"
+
+    # ---------------------------------------------------------
+    # Step 3 — CV0
+    # ---------------------------------------------------------
+    echo "[pipeline] Running CV0 for $trial"
+    python src/model/cv0_predict.py \
+        --config config.yaml \
+        --trial "$trial" \
+        --out "results/cv0_predictions/${trial}.csv"
+
+    # ---------------------------------------------------------
+    # Step 4 — CV00
+    # ---------------------------------------------------------
+    echo "[pipeline] Running CV00 for $trial"
+    python src/model/cv00_predict.py \
+        --config config.yaml \
+        --trial "$trial" \
+        --out "results/cv00_predictions/${trial}.csv"
+
+    # ---------------------------------------------------------
+    # Step 5 — Expected accuracy
+    # ---------------------------------------------------------
+    echo "[pipeline] Computing expected accuracy for $trial"
+    python src/model/expected_accuracy.py \
+        --config config.yaml \
+        --trial "$trial" \
+        --out "results/expected_accuracy/${trial}.csv"
+
+done
+
 echo ""
 echo "======================================"
-echo " Pipeline complete!"
+echo "Pipeline complete."
 echo "======================================"
