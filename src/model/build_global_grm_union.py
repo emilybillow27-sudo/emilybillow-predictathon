@@ -1,139 +1,145 @@
+#!/usr/bin/env python3
+
 import numpy as np
 import pandas as pd
-import allel
 from pathlib import Path
-import argparse
+
+def load_trial_genotypes(trial_dir):
+    """Load per-trial numeric genotype matrix and SNP list."""
+
+    geno_path = trial_dir / "processed" / "geno_numeric.npy"
+    matrix_path = trial_dir / "processed" / "geno_matrix.csv"
+
+    if not geno_path.exists() or not matrix_path.exists():
+        raise FileNotFoundError(f"Missing genotype files in {trial_dir}")
+
+    # Load numeric genotype matrix
+    G = np.load(geno_path)
+
+    # Load SNP IDs from geno_matrix.csv
+    df = pd.read_csv(matrix_path, nrows=0)
+    snps = df.columns.tolist()
+
+    # Drop non-SNP columns if present
+    non_snp_cols = {"line_name", "germplasmName", "Unnamed: 0"}
+    snps = [s for s in snps if s not in non_snp_cols]
+
+    # Ensure SNP count matches G
+    if len(snps) != G.shape[1]:
+        raise ValueError(
+            f"SNP count mismatch in {trial_dir}:\n"
+            f"  geno_matrix.csv columns = {len(snps)}\n"
+            f"  geno_numeric.npy columns = {G.shape[1]}"
+        )
+
+    return G, snps
+
+def align_to_union(G, snps, union_snps):
+    """Align a genotype matrix to the global union SNP list."""
+    snp_index = {s: i for i, s in enumerate(snps)}
+    aligned = np.zeros((G.shape[0], len(union_snps)), dtype=float)
+
+    for j, snp in enumerate(union_snps):
+        if snp in snp_index:
+            aligned[:, j] = G[:, snp_index[snp]]
+        else:
+            aligned[:, j] = np.nan  # missing SNP → impute later
+
+    return aligned
 
 
-def load_vcf(vcf_path):
-    """Load VCF and return samples, dosage matrix, and SNP keys."""
-    call = allel.read_vcf(
-        str(vcf_path),
-        fields=[
-            "samples",
-            "calldata/GT",
-            "variants/CHROM",
-            "variants/POS",
-            "variants/REF",
-            "variants/ALT",
-        ],
-    )
+def compute_vanraden_grm(G):
+    """Compute VanRaden GRM from numeric genotype matrix, robust to all-NaN markers."""
+    # Drop markers that are all NaN
+    valid_markers = ~np.all(np.isnan(G), axis=0)
+    G = G[:, valid_markers]
 
-    samples = call["samples"]
-    GT = call["calldata/GT"]  # shape: variants × samples × ploidy
+    # Impute missing values with marker means
+    col_means = np.nanmean(G, axis=0)
+    inds = np.where(np.isnan(G))
+    G[inds] = np.take(col_means, inds[1])
 
-    # Convert GT → dosage (0/1/2)
-    dosage = GT.sum(axis=2).astype(float)  # shape: variants × samples
+    # Center markers
+    M = G - G.mean(axis=0)
 
-    chrom = call["variants/CHROM"]
-    pos = call["variants/POS"]
-    ref = call["variants/REF"]
-    alt = call["variants/ALT"][:, 0]  # first ALT allele
+    # Allele frequency-based denominator
+    p = G.mean(axis=0) / 2.0  # if coded 0/1/2
+    denom = 2 * np.sum(p * (1 - p))
 
-    # Unique SNP key
-    keys = pd.Index(chrom + ":" + pos.astype(str) + ":" + ref + ":" + alt)
+    if denom == 0 or np.isnan(denom):
+        raise ValueError("Invalid GRM denominator (0 or NaN). Check genotype coding.")
 
-    return samples, dosage, keys
+    GRM = (M @ M.T) / denom
+
+    if np.isnan(GRM).any():
+        raise ValueError("GRM contains NaNs after computation.")
+
+    return GRM
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--vcf_list", required=True)
-    parser.add_argument("--outdir", required=True)
-    args = parser.parse_args()
+    repo = Path(__file__).resolve().parents[2]
+    predictathon_dir = repo / "data" / "predictathon"
 
-    outdir = Path(args.outdir)
+    trial_dirs = [d for d in predictathon_dir.iterdir() if d.is_dir()]
+    print(f"Found {len(trial_dirs)} trials for global GRM construction.")
+
+    # ---------------------------------------------------------
+    # Step 1 — Load all genotype matrices + SNP lists
+    # ---------------------------------------------------------
+    all_G = []
+    all_snps = []
+    all_lines = []
+
+    for tdir in trial_dirs:
+        G, snps = load_trial_genotypes(tdir)
+        all_G.append(G)
+        all_snps.append(snps)
+
+        # Load line names
+        lines = np.load(tdir / "processed" / "geno_lines.npy", allow_pickle=True).tolist()
+        all_lines.extend(lines)
+
+    # ---------------------------------------------------------
+    # Step 2 — Build global union SNP list
+    # ---------------------------------------------------------
+    union_snps = sorted(set().union(*all_snps))
+    print(f"Global union SNP count: {len(union_snps)}")
+
+    # ---------------------------------------------------------
+    # Step 3 — Align each trial to the union SNP list
+    # ---------------------------------------------------------
+    aligned_mats = []
+    for G, snps in zip(all_G, all_snps):
+        aligned = align_to_union(G, snps, union_snps)
+        aligned_mats.append(aligned)
+
+    # ---------------------------------------------------------
+    # Step 4 — Stack into global genotype matrix
+    # ---------------------------------------------------------
+    G_global = np.vstack(aligned_mats)
+
+    # ---------------------------------------------------------
+    # Step 5 — Compute global GRM
+    # ---------------------------------------------------------
+    print("Computing global GRM...")
+    GRM = compute_vanraden_grm(G_global)
+
+    # ---------------------------------------------------------
+    # Step 6 — Save outputs
+    # ---------------------------------------------------------
+    outdir = repo / "data" / "processed" / "global_union"
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # Load VCF paths
-    vcfs = [Path(p.strip()) for p in open(args.vcf_list)]
-    print("Using VCFs:", vcfs)
-
-    # First pass: collect union of SNP keys
-    union_keys = set()
-    vcf_data = []
-
-    for v in vcfs:
-        print(f"Loading {v} ...")
-        samples, dosage, keys = load_vcf(v)
-        union_keys |= set(keys)
-        vcf_data.append((v, samples, dosage, keys))
-
-    union_keys = pd.Index(sorted(list(union_keys)))
-    print("Total union SNPs:", len(union_keys))
-
-    # Second pass: align each VCF to union
-    all_genotypes = []
-    all_samples = []
-
-    for v, samples, dosage, keys in vcf_data:
-        print(f"Aligning {v} ...")
-
-        # Build SNPs × samples DataFrame
-        df = pd.DataFrame(dosage, index=keys, columns=samples)
-
-        # Reindex to union SNPs
-        df = df.reindex(union_keys)
-
-        # Impute missing SNPs with mean dosage
-        df = df.fillna(df.mean(axis=1))
-
-        # Store aligned matrix (samples × SNPs)
-        all_genotypes.append(df.values.T)
-        all_samples.extend(samples)
-
-    # Stack all trials: samples × SNPs
-    Gmat = np.vstack(all_genotypes)
-    print("Final genotype matrix shape:", Gmat.shape)
-
-        # ---------------------------------------------------------
-    # FIX: Impute NaNs in Gmat BEFORE centering/scaling
-    # ---------------------------------------------------------
-    # Compute column means ignoring NaNs
-    col_means = np.nanmean(Gmat, axis=0)
-
-    # Replace NaNs with column means
-    inds = np.where(np.isnan(Gmat))
-    if inds[0].size > 0:
-        Gmat[inds] = np.take(col_means, inds[1])
-
-    # ---------------------------------------------------------
-    # Center markers
-    # ---------------------------------------------------------
-    M = Gmat - Gmat.mean(axis=0, keepdims=True)
-
-    # ---------------------------------------------------------
-    # Drop monomorphic markers (std == 0)
-    # ---------------------------------------------------------
-    std = M.std(axis=0, ddof=1)
-    keep = std > 0
-    M = M[:, keep]
-    std = std[keep]
-
-    print("Markers kept after removing monomorphic sites:", M.shape[1])
-
-    # ---------------------------------------------------------
-    # Scale by std
-    # ---------------------------------------------------------
-    M = M / std
-
-    # ---------------------------------------------------------
-    # Compute GRM
-    # ---------------------------------------------------------
-    GRM = (M @ M.T) / M.shape[1]
-
-    # Save outputs
-    np.save(outdir / "G_global_union.npy", Gmat)
+    np.save(outdir / "G_global_union.npy", G_global)
     np.save(outdir / "GRM_global_union.npy", GRM)
 
     with open(outdir / "G_global_union_samples.txt", "w") as f:
-        for s in all_samples:
-            f.write(s + "\n")
+        for ln in all_lines:
+            f.write(f"{ln}\n")
 
-    print("Done. Saved:")
-    print(outdir / "G_global_union.npy")
-    print(outdir / "GRM_global_union.npy")
-    print(outdir / "G_global_union_samples.txt")
+    print("Global GRM construction complete.")
+    print(f"Saved to: {outdir}")
 
 
 if __name__ == "__main__":

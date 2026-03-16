@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 
 import os
+import numpy as np
 import pandas as pd
 
 # ---------------------------------------------------------
-# Resolve repo root (src/submission → repo root)
+# Resolve repo root
 # ---------------------------------------------------------
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 # ---------------------------------------------------------
-# Input: your existing results
+# Input: your results folders
 # ---------------------------------------------------------
-SOURCE = f"{REPO_ROOT}/submission_output"
+CV0_DIR = f"{REPO_ROOT}/results/cv0_predictions"
+CV00_DIR = f"{REPO_ROOT}/results/cv00_predictions"
 
-# Training metadata (for Trials.csv)
+# Training metadata
 TRAINING_META = f"{REPO_ROOT}/data/processed/unified_training_pheno_cleaned.csv"
+
+# Genotyped accessions live here
+GENO_ROOT = f"{REPO_ROOT}/data/predictathon"
 
 # ---------------------------------------------------------
 # Output: final submission folder
@@ -22,68 +27,67 @@ TRAINING_META = f"{REPO_ROOT}/data/processed/unified_training_pheno_cleaned.csv"
 OUTDIR = f"{REPO_ROOT}/submission"
 os.makedirs(OUTDIR, exist_ok=True)
 
+print("======================================")
+print(" Building Final Predictathon Submission")
+print("======================================\n")
+
 # ---------------------------------------------------------
 # Load training metadata
 # ---------------------------------------------------------
 train = pd.read_csv(TRAINING_META)
+
 training_trials = train["trial"].dropna().unique()
+training_accessions = train["germplasmName_mapped"].dropna().unique()
 
-# ---------------------------------------------------------
-# Helper to write metadata files
-# ---------------------------------------------------------
-def write_metadata(cv_dir, cv_type, predicted_accessions):
-    # Trials used for training
+def write_metadata(cv_dir, cv_type):
     pd.DataFrame({"studyName": training_trials}).to_csv(
-        os.path.join(cv_dir, f"{cv_type}_Trials.csv"),
-        index=False
+        os.path.join(cv_dir, f"{cv_type}_Trials.csv"), index=False
     )
-
-    # Accessions being predicted for THIS trial
-    pd.DataFrame({"germplasmName": predicted_accessions}).to_csv(
-        os.path.join(cv_dir, f"{cv_type}_Accessions.csv"),
-        index=False
+    pd.DataFrame({"germplasmName": training_accessions}).to_csv(
+        os.path.join(cv_dir, f"{cv_type}_Accessions.csv"), index=False
     )
 
 # ---------------------------------------------------------
-# Build submission folders
+# Process each trial
 # ---------------------------------------------------------
-for trial in os.listdir(SOURCE):
-    trial_path = os.path.join(SOURCE, trial)
-    if not os.path.isdir(trial_path):
-        continue
+trials = sorted([f.replace(".csv", "") for f in os.listdir(CV0_DIR) if f.endswith(".csv")])
 
-    # Create trial folder in submission/
+for trial in trials:
+    print(f"Processing {trial}...")
+
+    # Load genotyped accessions
+    geno_lines_path = f"{GENO_ROOT}/{trial}/processed/geno_lines.npy"
+    geno_lines = np.load(geno_lines_path, allow_pickle=True).tolist()
+    geno_norm = [str(x).strip() for x in geno_lines]
+
+    # Create trial folder
     trial_out = os.path.join(OUTDIR, trial)
     os.makedirs(trial_out, exist_ok=True)
 
-    # Process CV0 and CV00
-    for cv_type in ["CV0", "CV00"]:
-        pred_file = os.path.join(trial_path, f"{cv_type}_Predictions.csv")
-        if not os.path.exists(pred_file):
-            continue
+    # ---------------------------------------------------------
+    # CV0
+    # ---------------------------------------------------------
+    cv0_pred_file = f"{CV0_DIR}/{trial}.csv"
+    df0 = pd.read_csv(cv0_pred_file)
+    df0 = df0.rename(columns={"line_name": "germplasmName"})
+    df0 = df0[df0["germplasmName"].isin(geno_norm)]
 
-        # Create CV folder
-        cv_dir = os.path.join(trial_out, cv_type)
-        os.makedirs(cv_dir, exist_ok=True)
+    cv0_dir = os.path.join(trial_out, "CV0")
+    os.makedirs(cv0_dir, exist_ok=True)
+    df0.to_csv(os.path.join(cv0_dir, "CV0_Predictions.csv"), index=False)
+    write_metadata(cv0_dir, "CV0")
 
-        # Load predictions
-        df = pd.read_csv(pred_file)
+    # ---------------------------------------------------------
+    # CV00
+    # ---------------------------------------------------------
+    cv00_pred_file = f"{CV00_DIR}/{trial}.csv"
+    df00 = pd.read_csv(cv00_pred_file)
+    df00 = df00.rename(columns={"line_name": "germplasmName"})
+    df00 = df00[df00["germplasmName"].isin(geno_norm)]
 
-        # Standardize prediction column
-        if "pred_yield" in df.columns:
-            df = df.rename(columns={"pred_yield": "prediction"})
-        elif "pred" in df.columns:
-            df = df.rename(columns={"pred": "prediction"})
+    cv00_dir = os.path.join(trial_out, "CV00")
+    os.makedirs(cv00_dir, exist_ok=True)
+    df00.to_csv(os.path.join(cv00_dir, "CV00_Predictions.csv"), index=False)
+    write_metadata(cv00_dir, "CV00")
 
-        df = df[["germplasmName", "prediction"]]
-
-        # Save predictions
-        df.to_csv(os.path.join(cv_dir, f"{cv_type}_Predictions.csv"), index=False)
-
-        # Extract predicted accessions
-        predicted_accessions = df["germplasmName"].unique()
-
-        # Write metadata
-        write_metadata(cv_dir, cv_type, predicted_accessions)
-
-print(f"[submission] Final submission folder built → {OUTDIR}")
+print(f"\n[submission] Final submission folder built → {OUTDIR}")

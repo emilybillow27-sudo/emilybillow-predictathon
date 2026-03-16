@@ -5,28 +5,12 @@ import sys
 import numpy as np
 import pandas as pd
 
-
 # =========================================================
 # GRM builder (VanRaden-like)
 # =========================================================
 
 def build_grm_from_geno(geno_numeric):
-    """
-    Build a VanRaden-like genomic relationship matrix (GRM).
-
-    Parameters
-    ----------
-    geno_numeric : pandas.DataFrame or numpy.ndarray
-        Genotype dosage matrix with shape (n_lines, n_markers).
-        Values should be 0/1/2 or NaN.
-
-    Returns
-    -------
-    G : numpy.ndarray
-        GRM of shape (n_lines, n_lines).
-    """
-
-    # Convert to NumPy
+    """Build a VanRaden-like GRM from a genotype dosage matrix."""
     if hasattr(geno_numeric, "to_numpy"):
         X = geno_numeric.to_numpy(dtype=float)
     else:
@@ -36,7 +20,7 @@ def build_grm_from_geno(geno_numeric):
     if n_markers == 0:
         raise ValueError("Genotype matrix has zero markers.")
 
-    # Impute missing values with column means
+    # Impute missing values
     col_means = np.nanmean(X, axis=0)
     inds = np.where(np.isnan(X))
     if inds[0].size > 0:
@@ -46,172 +30,98 @@ def build_grm_from_geno(geno_numeric):
     std = X.std(axis=0)
     keep = std > 0
     if keep.sum() == 0:
-        raise ValueError("All markers are monomorphic after filtering.")
+        raise ValueError("All markers are monomorphic.")
     X = X[:, keep]
 
     # Center markers
     X_centered = X - X.mean(axis=0, keepdims=True)
     m = X_centered.shape[1]
 
-    # VanRaden-like GRM
-    G = (X_centered @ X_centered.T) / m
-
-    return G
+    # VanRaden GRM
+    return (X_centered @ X_centered.T) / m
 
 
 # =========================================================
-# GBLUP model class
+# LEGACY GBLUP MODEL (u_hat path)
 # =========================================================
 
-class GBLUPModel:
-    """
-    A lightweight, joblib‑serializable GBLUP model wrapper.
-
-    Stores:
-      - u_hat: breeding values in the same order as geno_lines
-      - lines: list of germplasm names
-    """
-
-    def __init__(self, u_hat, lines):
-        self.u_hat = np.asarray(u_hat)
-        self.lines = list(lines)
+class LegacyGBLUPModel:
+    """Legacy GBLUP container used by fit_model() and predict_for_trial()."""
+    def __init__(self, u_hat=None, lines=None):
+        self.u_hat = None if u_hat is None else np.asarray(u_hat, dtype=float)
+        self.lines = [] if lines is None else list(lines)
 
     def predict(self, G):
-        """
-        Standard prediction interface.
-        For GBLUP, predictions are simply u_hat for each line.
-        """
-        return self.u_hat
-
-    def predict_from_grm(self, G):
-        """
-        Some pipelines call this explicitly.
-        We return u_hat regardless of G, since GBLUP predictions
-        are already encoded in u_hat.
-        """
+        if self.u_hat is None:
+            raise ValueError("u_hat is not set on this LegacyGBLUPModel.")
         return self.u_hat
 
 
 # =========================================================
-# Core fit_model function (clean, unified)
+# LEGACY GBLUP SOLVER (used by train_model.py)
 # =========================================================
 
 def fit_model(train_pheno, geno_numeric, geno_lines, G, model_type="gblup"):
     """
-    Fit a GBLUP model using the full solution:
-        u = G (G_mm + λI)^(-1) y_m
-    where:
-        - G is the full GRM for all lines
-        - G_mm is the submatrix for lines with phenotypes
-        - y_m is the phenotype vector for those lines
-
-    Returns a GBLUPModel with u_hat for ALL geno_lines.
+    Legacy GBLUP:
+        u = G_all_m (G_mm + λI)^(-1) y_m
     """
-
     n_lines = len(geno_lines)
 
-    # -----------------------------------------------------
-    # Phenotype‑optional mode
-    # -----------------------------------------------------
     if train_pheno is None or len(train_pheno) == 0:
-        u_hat = np.zeros(n_lines)
-        return GBLUPModel(u_hat=u_hat, lines=geno_lines)
+        return LegacyGBLUPModel(u_hat=np.zeros(n_lines), lines=geno_lines)
 
-    # -----------------------------------------------------
-    # Align phenotype with genotype lines
-    # -----------------------------------------------------
     ph = train_pheno.copy()
+    if "germplasmName" not in ph.columns:
+        raise ValueError("train_pheno must contain 'germplasmName'.")
+
     ph = ph[ph["germplasmName"].isin(geno_lines)]
-
     pheno_map = dict(zip(ph["germplasmName"], ph["value"]))
+
     y = np.array([pheno_map.get(line, np.nan) for line in geno_lines])
-
     mask = ~np.isnan(y)
+
     if mask.sum() == 0:
-        u_hat = np.zeros(n_lines)
-        return GBLUPModel(u_hat=u_hat, lines=geno_lines)
+        return LegacyGBLUPModel(u_hat=np.zeros(n_lines), lines=geno_lines)
 
-    # Lines with phenotypes
     y_m = y[mask]
-    G_mm = G[np.ix_(mask, mask)]          # phenotyped × phenotyped
-    G_all_m = G[:, mask]                  # all lines × phenotyped
+    G_mm = G[np.ix_(mask, mask)]
+    G_all_m = G[:, mask]
 
-    # -----------------------------------------------------
-    # Full GBLUP solution: u = G_all_m (G_mm + λI)^(-1) y_m
-    # -----------------------------------------------------
     lam = 1e-5
     A = G_mm + lam * np.eye(G_mm.shape[0])
-    alpha = np.linalg.solve(A, y_m)       # (G_mm + λI)^(-1) y_m
+    alpha = np.linalg.solve(A, y_m)
 
-    u_hat = G_all_m @ alpha               # breeding values for ALL lines
+    u_hat = G_all_m @ alpha
+    return LegacyGBLUPModel(u_hat=u_hat, lines=geno_lines)
 
-    return GBLUPModel(u_hat=u_hat, lines=geno_lines)
 
 # =========================================================
-# Prediction (kept for compatibility)
+# LEGACY PREDICTION (used by train_model pipeline)
 # =========================================================
 
 def predict_for_trial(model, focal_trial, test_accessions, geno_numeric, geno_lines, env, G, model_type="gblup"):
-    """
-    Predict breeding values for test_accessions using the fitted GBLUPModel.
-    All lines have non‑zero u_hat from the full GBLUP solution.
-    """
-
-    if isinstance(model, GBLUPModel):
+    """Return u_hat for requested accessions."""
+    if isinstance(model, LegacyGBLUPModel):
         u_hat = model.u_hat
-        line_index = {ln: i for i, ln in enumerate(model.lines)}
+        idx = {ln: i for i, ln in enumerate(model.lines)}
+        preds = [u_hat[idx.get(acc, -1)] if acc in idx else 0.0 for acc in test_accessions]
+        return pd.DataFrame({"germplasmName": test_accessions, "pred": preds})
 
-        preds = []
-        for acc in test_accessions:
-            idx = line_index.get(acc, None)
-            if idx is None:
-                preds.append(0.0)
-            else:
-                preds.append(u_hat[idx])
+    raise TypeError("Model must be LegacyGBLUPModel for legacy prediction.")
 
-        return pd.DataFrame({
-            "germplasmName": test_accessions,
-            "pred": preds
-        })
-
-    # Legacy dict path (if still needed)
-    if isinstance(model, dict):
-        u = model["u"]
-        geno_lines_model = model["geno_lines"]
-        line_index = {ln: i for i, ln in enumerate(geno_lines_model)}
-
-        preds = []
-        for acc in test_accessions:
-            idx = line_index.get(acc, None)
-            preds.append(u[idx] if idx is not None else 0.0)
-
-        return pd.DataFrame({
-            "germplasmName": test_accessions,
-            "pred": preds
-        })
-
-    raise TypeError("Model must be GBLUPModel or legacy dict model.")
 
 # =========================================================
-# Simple CV (unchanged, but now uses GBLUPModel)
+# SIMPLE CV (unchanged)
 # =========================================================
 
 def cross_validate_model(train_pheno, geno_numeric, geno_lines, env, G, model_type="gblup", n_folds=5):
-    """
-    Simple CV over lines within a single trial.
-    """
-
     if "germplasmName" not in train_pheno.columns or "value" not in train_pheno.columns:
-        raise ValueError("train_pheno must contain 'germplasmName' and 'value'.")
+        raise ValueError("train_pheno must contain germplasmName and value.")
 
-    # Line means
-    line_means = (
-        train_pheno.groupby("germplasmName")["value"]
-        .mean()
-        .reset_index()
-    )
-
+    line_means = train_pheno.groupby("germplasmName")["value"].mean().reset_index()
     lines = line_means["germplasmName"].tolist()
+
     rng = np.random.default_rng(42)
     rng.shuffle(lines)
     folds = np.array_split(lines, n_folds)
@@ -219,35 +129,15 @@ def cross_validate_model(train_pheno, geno_numeric, geno_lines, env, G, model_ty
     results = []
 
     for fold_id, test_lines in enumerate(folds, start=1):
-        test_lines = list(test_lines)
         train_lines = [ln for ln in lines if ln not in test_lines]
 
         train_df = line_means[line_means["germplasmName"].isin(train_lines)]
         test_df = line_means[line_means["germplasmName"].isin(test_lines)]
 
-        model = fit_model(
-            train_pheno=train_df,
-            geno_numeric=geno_numeric,
-            geno_lines=geno_lines,
-            G=G,
-            model_type=model_type
-        )
+        model = fit_model(train_df, geno_numeric, geno_lines, G)
 
-        preds = predict_for_trial(
-            model=model,
-            focal_trial=None,
-            test_accessions=test_lines,
-            geno_numeric=geno_numeric,
-            geno_lines=geno_lines,
-            env=None,
-            G=G,
-            model_type=model_type
-        )
-
-        merged = (
-            test_df[["germplasmName", "value"]]
-            .merge(preds, on="germplasmName", how="left")
-        )
+        preds = predict_for_trial(model, None, test_lines, geno_numeric, geno_lines, None, G)
+        merged = test_df.merge(preds, on="germplasmName", how="left")
         merged["fold"] = fold_id
 
         results.append(merged)
@@ -256,12 +146,38 @@ def cross_validate_model(train_pheno, geno_numeric, geno_lines, env, G, model_ty
 
 
 # =========================================================
+# NEW GLOBAL-GRM GBLUP (mu, alpha) for CV0/CV00
+# =========================================================
+
+class GBLUPModel:
+    """New global-GRM GBLUP model."""
+    def __init__(self, mu, alpha):
+        self.mu = float(mu)
+        self.alpha = np.asarray(alpha, dtype=float)
+
+
+def gblup_fit(K, y, lam=1e-1):
+    """Stable ridge-regularized GBLUP."""
+    mu = np.mean(y)
+    y_centered = y - mu
+
+    n = K.shape[0]
+    K_reg = K + lam * np.eye(n)
+
+    alpha, *_ = np.linalg.lstsq(K_reg, y_centered, rcond=1e-6)
+    return GBLUPModel(mu=mu, alpha=alpha)
+
+
+def gblup_predict(model, K_pred):
+    return model.mu + K_pred @ model.alpha
+
+
+# =========================================================
 # CLI: build GRM for a trial
 # =========================================================
 
 def _cli_build_grm(trial):
     ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-
     geno_path = f"{ROOT}/data/predictathon/{trial}/processed/geno_matrix.csv"
     outdir = f"{ROOT}/data/predictathon/{trial}/processed"
     os.makedirs(outdir, exist_ok=True)
@@ -284,8 +200,7 @@ def _cli_build_grm(trial):
 
 def main():
     if len(sys.argv) >= 3 and sys.argv[1] == "build_grm":
-        trial = sys.argv[2]
-        _cli_build_grm(trial)
+        _cli_build_grm(sys.argv[2])
     else:
         raise SystemExit("Usage: python -m src.model.models build_grm <TRIAL>")
 

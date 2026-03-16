@@ -1,9 +1,0 @@
-data/predictathon/2025_AYT_Aurora/genotypes/2025_AYT_Aurora_filtered.vcf.gz
-data/predictathon/24Crk_AY2-3/genotypes/24Crk_AY2-3_filtered.vcf.gz
-data/predictathon/25_Big6_SVREC_SVREC/genotypes/25_Big6_SVREC_SVREC_filtered.vcf.gz
-data/predictathon/AWY1_DVPWA_2024/genotypes/AWY1_DVPWA_2024_filtered.vcf.gz
-data/predictathon/CornellMaster_2025_McGowan/genotypes/CornellMaster_2025_McGowan_filtered.vcf.gz
-data/predictathon/OHRWW_2025_SPO/genotypes/OHRWW_2025_SPO_filtered.vcf.gz
-data/predictathon/STP1_2025_MCG/genotypes/GBS_TAMU_MCG25.vcf.gz
-data/predictathon/TCAP_2025_MANKS/genotypes/TCAP_2025_MANKS_filtered.vcf.gz
-data/predictathon/YT_Urb_25/genotypes/YT_Urb_25_filtered.vcf.gz

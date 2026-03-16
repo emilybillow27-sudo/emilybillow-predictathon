@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -32,7 +31,6 @@ def parse_args():
 def subset_pheno_for_trial(unified_pheno: pd.DataFrame, trial: str) -> pd.DataFrame:
     """
     Subset unified_training_pheno_mapped.csv to rows belonging to this trial.
-    We detect the trial column automatically.
     """
     trial_cols = [
         c for c in unified_pheno.columns
@@ -82,16 +80,11 @@ def main():
 
     if pheno.empty:
         print(f"[train_model] No phenotype rows found for {trial}.")
-        print("[train_model] This trial will still produce a model using genotype-only structure.")
-        # We allow pheno to be empty — model fitting will handle it.
+        print("[train_model] Model will be genotype-only.")
     else:
-        # Standardize accession column
-        if "germplasm_name" in pheno.columns:
-            pheno = pheno.rename(columns={"germplasm_name": "germplasmName"})
-        elif "germplasmName" not in pheno.columns:
-            raise SystemExit("Unified phenotype file must contain 'germplasm_name' or 'germplasmName'.")
+        if "germplasmName_mapped" not in pheno.columns:
+            raise SystemExit("Unified phenotype file must contain 'germplasmName_mapped'.")
 
-        # Ensure numeric phenotype
         if "value" not in pheno.columns:
             raise SystemExit("Unified phenotype file must contain a 'value' column.")
 
@@ -102,10 +95,10 @@ def main():
             pheno = pheno.dropna(subset=["value"])
 
         print(f"✓ Loaded phenotype: {pheno.shape[0]} rows, "
-              f"{pheno['germplasmName'].nunique()} unique lines")
+              f"{pheno['germplasmName_mapped'].nunique()} unique mapped lines")
 
     # ---------------------------------------------------------
-    # Load genotype
+    # Load genotype (trial-specific, used only for prediction)
     # ---------------------------------------------------------
     geno_numeric_path = trial_proc_dir / "geno_numeric.npy"
     geno_lines_path = trial_proc_dir / "geno_lines.npy"
@@ -121,14 +114,22 @@ def main():
     print(f"✓ Loaded genotype: {len(geno_lines)} lines × {geno_numeric.shape[1]} markers")
 
     # ---------------------------------------------------------
-    # Load GRM
+    # Load GLOBAL GRM + sample list
     # ---------------------------------------------------------
-    grm_path = trial_proc_dir / "GRM.npy"
-    if not grm_path.exists():
-        raise SystemExit(f"GRM not found: {grm_path}")
+    grm_dir = Path(paths["global_grm_root"])
+    global_grm_path = grm_dir / "GRM_global_union.npy"
+    global_samples_path = grm_dir / "G_global_union_samples.txt"
 
-    G = np.load(grm_path)
-    print(f"✓ Loaded GRM: {G.shape}")
+    if not global_grm_path.exists():
+        raise SystemExit(f"Global GRM not found: {global_grm_path}")
+    if not global_samples_path.exists():
+        raise SystemExit(f"Global GRM sample list not found: {global_samples_path}")
+
+    G = np.load(global_grm_path)
+    with open(global_samples_path) as f:
+        global_samples = [x.strip() for x in f]
+
+    print(f"✓ Loaded GLOBAL GRM: {G.shape}")
 
     # ---------------------------------------------------------
     # Save GRM + GRM lines for CV0/CV00
@@ -138,21 +139,21 @@ def main():
 
     out_lines_path = outdir / "GRM_lines.txt"
     with open(out_lines_path, "w") as f:
-        for g in geno_lines:
+        for g in global_samples:
             f.write(g + "\n")
 
-    print(f"✓ Saved GRM → {out_grm_path}")
-    print(f"✓ Saved GRM lines → {out_lines_path}")
+    print(f"✓ Saved GLOBAL GRM → {out_grm_path}")
+    print(f"✓ Saved GLOBAL GRM lines → {out_lines_path}")
 
     # ---------------------------------------------------------
-    # Fit model
+    # Fit model (using GLOBAL samples, not trial samples)
     # ---------------------------------------------------------
     print("\nFitting model...")
 
     model = fit_model(
         train_pheno=pheno if not pheno.empty else None,
         geno_numeric=geno_numeric,
-        geno_lines=geno_lines,
+        geno_lines=global_samples,   # aligned to global GRM
         G=G,
         model_type="gblup"
     )

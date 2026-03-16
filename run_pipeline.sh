@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+# Resolve repo root
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
 echo "======================================"
 echo "  T3/Wheat Predictathon Pipeline"
 echo "======================================"
@@ -46,28 +50,28 @@ for trial in "${TRIALS[@]}"; do
     # Step 3 — CV0
     # ---------------------------------------------------------
     echo "[pipeline] Running CV0 for $trial"
-    python src/model/cv0_predict.py \
-        --config config.yaml \
+    python "$SCRIPT_DIR/src/model/cv0_predict_global.py" \
+        --config "$SCRIPT_DIR/config.yaml" \
         --trial "$trial" \
-        --out "results/cv0_predictions/${trial}.csv"
+        --out "$SCRIPT_DIR/results/cv0_predictions/${trial}.csv"
 
     # ---------------------------------------------------------
     # Step 4 — CV00
     # ---------------------------------------------------------
     echo "[pipeline] Running CV00 for $trial"
-    python src/model/cv00_predict.py \
-        --config config.yaml \
+    python "$SCRIPT_DIR/src/model/cv00_predict_global.py" \
+        --config "$SCRIPT_DIR/config.yaml" \
         --trial "$trial" \
-        --out "results/cv00_predictions/${trial}.csv"
+        --out "$SCRIPT_DIR/results/cv00_predictions/${trial}.csv"
 
     # ---------------------------------------------------------
     # Step 5 — Expected accuracy
     # ---------------------------------------------------------
     echo "[pipeline] Computing expected accuracy for $trial"
-    python src/model/expected_accuracy.py \
-        --config config.yaml \
+    python "$SCRIPT_DIR/src/model/expected_accuracy.py" \
+        --config "$SCRIPT_DIR/config.yaml" \
         --trial "$trial" \
-        --out "results/expected_accuracy/${trial}.csv"
+        --out "$SCRIPT_DIR/results/expected_accuracy/${trial}.csv"
 
 done
 

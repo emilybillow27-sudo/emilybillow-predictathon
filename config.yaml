@@ -2,7 +2,6 @@
 #   Predictathon Pipeline Configuration
 # ============================================
 
-# Trials for which CV0 / CV00 predictions will be generated
 focal_trials:
   - AWY1_DVPWA_2024
   - TCAP_2025_MANKS
@@ -14,49 +13,38 @@ focal_trials:
   - YT_Urb_25
   - STP1_2025_MCG
 
-# --------------------------------------------
-# Trait configuration
-# --------------------------------------------
 traits:
-  target_trait: value   # column name in unified_training_pheno_cleaned.csv
+  target_trait: value
 
-# --------------------------------------------
-# Model configuration
-# --------------------------------------------
 model:
-  use_ml: false         # use RR-BLUP / GBLUP
-  lambda_factor: 1e-5   # ridge penalty scaling
+  use_ml: false
+  lambda_factor: 1e-5
 
-# --------------------------------------------
-# Paths used by the pipeline
-# --------------------------------------------
 paths:
-  # Where processed phenotype + env files live
+  # Processed phenotype + env files
   processed_data: data/processed
 
   # Predictathon trial directories
   predictathon_root: data/predictathon
 
-  # Where per-trial models were stored (legacy compatibility)
+  # Where per-trial models are stored
   trained_models_root: trained_models
 
-  # Global GRM + global genotype matrix directory
-  global_union_root: data/processed/global_union
+  # -------------------------------------------------------
+  # Global GRM (used for ALL trials)
+  # -------------------------------------------------------
+  global_grm_root: data/processed/global_union
+  global_grm_path: data/processed/global_union/GRM_global_union.npy
+  global_grm_samples: data/processed/global_union/G_global_union_samples.txt
 
-  # Global model directory (legacy compatibility)
-  global_model_root: trained_models/global_union_model
-
-  # Output directories
+  # -------------------------------------------------------
+  # Outputs
+  # -------------------------------------------------------
   results_root: results
-  cv0_predictions: results/cv0_predictions_yield
-  cv00_predictions: results/cv00_predictions_yield
+  cv0_predictions: results/cv0_predictions
+  cv00_predictions: results/cv00_predictions
   expected_accuracy: results/expected_accuracy
+  submission_root: submission
 
-  # NEW: Where the driver writes final CV0/CV00 outputs
-  submission_root: submission_output
-
-# --------------------------------------------
-# Unified phenotype file (training only)
-# --------------------------------------------
 phenotypes:
-  unified_training: data/processed/unified_training_pheno_cleaned.csv
+  unified_training: data/processed/unified_training_pheno_mapped.csv

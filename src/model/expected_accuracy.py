@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 
 import argparse
-import pathlib
 import yaml
 import numpy as np
 import pandas as pd
+from pathlib import Path
 import joblib
 import sys
-from pathlib import Path
 
-# Ensure repo root is on PYTHONPATH so joblib can import src.model.models
+# Ensure repo root is on PYTHONPATH
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -28,16 +27,18 @@ def main():
     args = parser.parse_args()
 
     # ---------------------------------------------------------
-    # Load config + paths
+    # Load config
     # ---------------------------------------------------------
     config = load_config(args.config)
     paths = config["paths"]
 
-    trained_models_root = pathlib.Path(paths["trained_models_root"])
-    unified_pheno_path = pathlib.Path(config["phenotypes"]["unified_training"])
+    unified_pheno_path = Path(config["phenotypes"]["unified_training"])
+    global_grm_path = Path(paths["global_grm_path"])
+    global_samples_path = Path(paths["global_grm_samples"])
+    trained_models_root = Path(paths["trained_models_root"])
 
     trial = args.trial
-    out_path = pathlib.Path(args.out)
+    out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # ---------------------------------------------------------
@@ -49,10 +50,7 @@ def main():
     pheno = pd.read_csv(unified_pheno_path, low_memory=False)
 
     # Identify trial column
-    trial_cols = [
-        c for c in pheno.columns
-        if "trial" in c.lower() or "study" in c.lower()
-    ]
+    trial_cols = [c for c in pheno.columns if "trial" in c.lower()]
     if not trial_cols:
         raise SystemExit("Could not infer trial column in unified phenotype file.")
     trial_col = trial_cols[0]
@@ -60,7 +58,6 @@ def main():
     # Subset to this trial
     ph = pheno[pheno[trial_col] == trial].copy()
 
-    # If no phenotypes → expected accuracy not applicable
     if ph.empty:
         df = pd.DataFrame({
             "trial": [trial],
@@ -84,7 +81,7 @@ def main():
     ph = ph.dropna(subset=["value"])
 
     # ---------------------------------------------------------
-    # Load model
+    # Load trained model
     # ---------------------------------------------------------
     model_path = trained_models_root / trial / "final_model.joblib"
     if not model_path.exists():
@@ -93,33 +90,45 @@ def main():
     model = joblib.load(model_path)
 
     # ---------------------------------------------------------
-    # Load GRM + line order
+    # Load global GRM + sample order
     # ---------------------------------------------------------
-    grm_path = trained_models_root / trial / "GRM.npy"
+    if not global_grm_path.exists():
+        raise SystemExit(f"Global GRM not found: {global_grm_path}")
+    if not global_samples_path.exists():
+        raise SystemExit(f"Global GRM sample list not found: {global_samples_path}")
+
+    GRM_global = np.load(global_grm_path)
+    with open(global_samples_path, "r") as f:
+        global_samples = [ln.strip() for ln in f if ln.strip()]
+
+    # ---------------------------------------------------------
+    # Load GRM slice used for training this trial
+    # ---------------------------------------------------------
+    grm_slice_path = trained_models_root / trial / "GRM.npy"
     lines_path = trained_models_root / trial / "GRM_lines.txt"
 
-    if not grm_path.exists():
-        raise SystemExit(f"GRM not found: {grm_path}")
+    if not grm_slice_path.exists():
+        raise SystemExit(f"GRM slice not found: {grm_slice_path}")
     if not lines_path.exists():
         raise SystemExit(f"GRM_lines.txt not found: {lines_path}")
 
-    G = np.load(grm_path)
+    G_slice = np.load(grm_slice_path)
     with open(lines_path, "r") as f:
-        lines = [ln.strip() for ln in f if ln.strip()]
+        slice_lines = [ln.strip() for ln in f if ln.strip()]
 
     # ---------------------------------------------------------
-    # Compute predictions for all lines
+    # Compute predictions for all lines in the GRM slice
     # ---------------------------------------------------------
     if hasattr(model, "predict_from_grm"):
-        u_hat = model.predict_from_grm(G)
+        u_hat = model.predict_from_grm(G_slice)
     else:
-        u_hat = model.predict(G)
+        u_hat = model.predict(G_slice)
 
     # ---------------------------------------------------------
     # Align phenotype with model line order
     # ---------------------------------------------------------
     ph_map = dict(zip(ph["germplasmName"], ph["value"]))
-    y = np.array([ph_map.get(ln, np.nan) for ln in lines])
+    y = np.array([ph_map.get(ln, np.nan) for ln in slice_lines])
 
     mask = ~np.isnan(y)
     if mask.sum() == 0:
