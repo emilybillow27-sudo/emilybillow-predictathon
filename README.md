@@ -109,7 +109,6 @@ Each folder contains:
 - Predictions
 - Accessions used
 - Trials used for training
-- Fully compliant with Predictathon requirements.
 
 ## Contact
 Emily Billow
