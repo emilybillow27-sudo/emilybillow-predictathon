@@ -115,3 +115,5 @@ Each folder contains:
 Emily Billow
 Graduate Research Assistant
 Soil & Crop Sciences, Colorado State University
+
+Emily.Billow@colostate.edu
