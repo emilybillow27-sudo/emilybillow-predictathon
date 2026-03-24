@@ -1,7 +1,3 @@
-###############################################
-#   T3/Wheat Predictathon — Unified Pipeline
-###############################################
-
 TRIALS = [
     "2025_AYT_Aurora",
     "24Crk_AY2-3",
@@ -33,20 +29,14 @@ rule all:
         expand("results/cv00_predictions/{trial}.csv", trial=TRIALS),
         "predictathon_submission/ALL_DONE.txt"
 
-
-###############################################
-# 1. Extract sample names per trial
-###############################################
+# Extract sample names
 rule extract_samples:
     output:
         "results/samples/{trial}.txt"
     shell:
         "python -m src.extract_new_samples {wildcards.trial}"
 
-
-###############################################
-# 2. Filter VCF to sample list
-###############################################
+# Filter vcf to sample list
 rule filter_vcf:
     input:
         vcf=lambda wc: f"data/predictathon/{wc.trial}/genotypes/{VCF_FILES[wc.trial]}",
@@ -56,10 +46,7 @@ rule filter_vcf:
     shell:
         "bcftools view -S {input.samples} -Oz -o {output} {input.vcf}"
 
-
-###############################################
-# 3. Convert filtered VCF → genotype matrix
-###############################################
+# Convert filtered vcf to genotype matrix
 rule vcf_to_matrix:
     input:
         "data/predictathon/{trial}/genotypes/{trial}_filtered.vcf.gz"
@@ -68,10 +55,7 @@ rule vcf_to_matrix:
     shell:
         "python -m src.preprocess_genotypes {wildcards.trial}"
 
-
-###############################################
-# 4. Build GLOBAL GRM (once)
-###############################################
+# Build global grm
 rule build_global_grm:
     input:
         expand("data/processed/{trial}/geno_matrix.csv", trial=TRIALS)
@@ -79,12 +63,9 @@ rule build_global_grm:
         "data/processed/GRM_predictathon.npy",
         "data/processed/GRM_predictathon_lines.txt"
     shell:
-        "python -m src.build_global_grm"
+        "python -m src.build_global_grm_union"
 
-
-###############################################
-# 5. Train model per trial
-###############################################
+# Train model
 rule train_model:
     input:
         geno="data/processed/{trial}/geno_matrix.csv",
@@ -95,10 +76,7 @@ rule train_model:
     shell:
         "python -m src.train_model {wildcards.trial}"
 
-
-###############################################
-# 6. CV0 predictions per trial
-###############################################
+# Generate cv0 predictions
 rule cv0_predict:
     input:
         model="trained_models/{trial}/final_model.joblib",
@@ -109,10 +87,7 @@ rule cv0_predict:
     shell:
         "python -m src.cv0_predict {wildcards.trial}"
 
-
-###############################################
-# 7. CV00 predictions per trial
-###############################################
+# Generate cv00 predictions
 rule cv00_predict:
     input:
         model="trained_models/{trial}/final_model.joblib",
@@ -123,10 +98,7 @@ rule cv00_predict:
     shell:
         "python -m src.cv00_predict {wildcards.trial}"
 
-
-###############################################
-# 8. Predictathon submission per trial
-###############################################
+# Build submission
 rule build_submission:
     input:
         model="trained_models/{trial}/final_model.joblib",
@@ -138,10 +110,7 @@ rule build_submission:
     shell:
         "python -m src.build_predictathon_submission {wildcards.trial}"
 
-
-###############################################
-# 9. Final marker
-###############################################
+# Final marker
 rule done:
     input:
         expand("predictathon_submission/{trial}/submission.csv", trial=TRIALS),

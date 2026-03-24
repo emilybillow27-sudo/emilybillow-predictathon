@@ -1,13 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 
-# Resolve repo root
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "======================================"
-echo "  T3/Wheat Predictathon Pipeline"
-echo "======================================"
+# Handle clean flag
+if [[ "${1:-}" == "--clean" ]]; then
+    rm -rf data/predictathon/*/processed
+    rm -rf data/processed/global_union
+    rm -rf trained_models
+    rm -rf results/cv0_predictions
+    rm -rf results/cv00_predictions
+    rm -rf submission
+    echo "Clean complete."
+    exit 0
+fi
 
 TRIALS=(
     AWY1_DVPWA_2024
@@ -21,61 +28,37 @@ TRIALS=(
     STP1_2025_MCG
 )
 
+# Preprocess genotypes for all trials
 for trial in "${TRIALS[@]}"; do
-    echo ""
-    echo "======================================"
-    echo "Processing trial: $trial"
-    echo "======================================"
-
     PROC_DIR="data/predictathon/$trial/processed"
     GRM_PATH="$PROC_DIR/GRM.npy"
 
-    # ---------------------------------------------------------
-    # Step 1 — Preprocess genotypes (only if needed)
-    # ---------------------------------------------------------
     if [ ! -f "$GRM_PATH" ]; then
-        echo "[pipeline] No GRM found — preprocessing genotypes for $trial"
         python -m src.genotypes.preprocess_genotypes "$trial"
-    else
-        echo "[pipeline] GRM already exists — skipping genotype preprocessing"
     fi
+done
 
-    # ---------------------------------------------------------
-    # Step 2 — Train model
-    # ---------------------------------------------------------
-    echo "[pipeline] Training model for $trial"
+# Build global grm once
+GLOBAL_GRM="data/processed/global_union/GRM_global_union.npy"
+
+if [ ! -f "$GLOBAL_GRM" ]; then
+    python src/model/build_global_grm_union.py
+fi
+
+# Train models and generate predictions
+for trial in "${TRIALS[@]}"; do
     python -m src.model.train_model "$trial"
 
-    # ---------------------------------------------------------
-    # Step 3 — CV0
-    # ---------------------------------------------------------
-    echo "[pipeline] Running CV0 for $trial"
     python "$SCRIPT_DIR/src/model/cv0_predict_global.py" \
         --config "$SCRIPT_DIR/config.yaml" \
         --trial "$trial" \
         --out "$SCRIPT_DIR/results/cv0_predictions/${trial}.csv"
 
-    # ---------------------------------------------------------
-    # Step 4 — CV00
-    # ---------------------------------------------------------
-    echo "[pipeline] Running CV00 for $trial"
     python "$SCRIPT_DIR/src/model/cv00_predict_global.py" \
         --config "$SCRIPT_DIR/config.yaml" \
         --trial "$trial" \
         --out "$SCRIPT_DIR/results/cv00_predictions/${trial}.csv"
-
-    # ---------------------------------------------------------
-    # Step 5 — Expected accuracy
-    # ---------------------------------------------------------
-    echo "[pipeline] Computing expected accuracy for $trial"
-    python "$SCRIPT_DIR/src/model/expected_accuracy.py" \
-        --config "$SCRIPT_DIR/config.yaml" \
-        --trial "$trial" \
-        --out "$SCRIPT_DIR/results/expected_accuracy/${trial}.csv"
-
 done
 
-echo ""
-echo "======================================"
+# Print completion message
 echo "Pipeline complete."
-echo "======================================"

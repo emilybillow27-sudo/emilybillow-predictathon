@@ -134,5 +134,5 @@ if errors:
     for e in errors:
         print(" -", e)
 else:
-    print(" All submission files validated successfully!")
+    print(" All submission files validated successfully")
 print("======================================")

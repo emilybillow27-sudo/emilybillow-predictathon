@@ -47,9 +47,8 @@ def main():
         cv0_out = trial_dir / "CV0_Predictions.csv"
         cv00_out = trial_dir / "CV00_Predictions.csv"
 
-        # -----------------------------
+
         # Run true CV0
-        # -----------------------------
         subprocess.run([
             sys.executable, str(cv0_script),
             "--config", "config.yaml",
@@ -57,9 +56,8 @@ def main():
             "--out", str(cv0_out)
         ], check=True)
 
-        # -----------------------------
+ 
         # Run true CV00
-        # -----------------------------
         subprocess.run([
             sys.executable, str(cv00_script),
             "--config", "config.yaml",

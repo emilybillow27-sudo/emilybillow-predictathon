@@ -1,7 +1,3 @@
-# ============================================
-#   Predictathon Pipeline Configuration
-# ============================================
-
 focal_trials:
   - AWY1_DVPWA_2024
   - TCAP_2025_MANKS
@@ -21,25 +17,21 @@ model:
   lambda_factor: 1e-5
 
 paths:
-  # Processed phenotype + env files
+  # Processed phenotype and env files
   processed_data: data/processed
 
   # Predictathon trial directories
   predictathon_root: data/predictathon
 
-  # Where per-trial models are stored
+  # Per-trial model directory
   trained_models_root: trained_models
 
-  # -------------------------------------------------------
-  # Global GRM (used for ALL trials)
-  # -------------------------------------------------------
+  # Global grm directory
   global_grm_root: data/processed/global_union
   global_grm_path: data/processed/global_union/GRM_global_union.npy
   global_grm_samples: data/processed/global_union/G_global_union_samples.txt
 
-  # -------------------------------------------------------
-  # Outputs
-  # -------------------------------------------------------
+  # Output directories
   results_root: results
   cv0_predictions: results/cv0_predictions
   cv00_predictions: results/cv00_predictions
