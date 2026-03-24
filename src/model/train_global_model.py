@@ -3,9 +3,8 @@
 import sys
 from pathlib import Path
 
-# ---------------------------------------------------------
+
 # Add repo root to PYTHONPATH BEFORE importing src.*
-# ---------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
@@ -29,9 +28,8 @@ def main():
     trial = args.trial
     repo = Path(__file__).resolve().parents[2]
 
-    # ---------------------------------------------------------
+
     # Load unified phenotype file
-    # ---------------------------------------------------------
     pheno = pd.read_csv(
         repo / "data" / "processed" / "unified_training_pheno_mapped.csv"
     )
@@ -49,9 +47,8 @@ def main():
     )
     trial_lines = [normalize(x) for x in trial_lines_raw]
 
-    # ---------------------------------------------------------
+
     # Load global GRM + samples
-    # ---------------------------------------------------------
     grm_dir = repo / "data" / "processed" / "global_union"
     GRM = np.load(grm_dir / "GRM_global_union.npy")
 
@@ -60,24 +57,21 @@ def main():
 
     global_samples = [normalize(x) for x in global_samples_raw]
 
-    # ---------------------------------------------------------
+
     # Filter out lines not present in the global GRM
-    # ---------------------------------------------------------
     missing = [l for l in trial_lines if l not in global_samples]
     trial_lines = [l for l in trial_lines if l in global_samples]
 
     if missing:
         print(f"[train_global] Warning: {len(missing)} lines missing from global GRM and skipped.")
 
-    # ---------------------------------------------------------
+
     # Slice GRM to trial lines
-    # ---------------------------------------------------------
     idx = [global_samples.index(l) for l in trial_lines]
     GRM_sub = GRM[np.ix_(idx, idx)]
 
-    # ---------------------------------------------------------
+
     # Extract phenotype vector (line means)
-    # ---------------------------------------------------------
     pheno_map = (
         pheno_trial.groupby("germplasmName_mapped_norm")["value"]
         .mean()
@@ -86,14 +80,12 @@ def main():
 
     y = np.array([pheno_map[l] for l in trial_lines], dtype=float)
 
-    # ---------------------------------------------------------
+
     # Fit GBLUP
-    # ---------------------------------------------------------
     model = gblup_fit(GRM_sub, y)
 
-    # ---------------------------------------------------------
+
     # Save model + GRM slice
-    # ---------------------------------------------------------
     outdir = repo / "trained_models" / trial
     outdir.mkdir(parents=True, exist_ok=True)
 

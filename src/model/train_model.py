@@ -12,9 +12,8 @@ import yaml
 from src.model.models import fit_model
 
 
-# ---------------------------------------------------------
+
 # Helpers
-# ---------------------------------------------------------
 
 def load_config(path: Path) -> dict:
     with open(path, "r") as f:
@@ -43,9 +42,8 @@ def subset_pheno_for_trial(unified_pheno: pd.DataFrame, trial: str) -> pd.DataFr
     return unified_pheno[unified_pheno[trial_col] == trial].copy()
 
 
-# ---------------------------------------------------------
+
 # Main
-# ---------------------------------------------------------
 
 def main():
     args = parse_args()
@@ -67,9 +65,8 @@ def main():
 
     print(f"\nTraining model for {trial}\n")
 
-    # ---------------------------------------------------------
+
     # Load unified phenotype file
-    # ---------------------------------------------------------
     if not unified_pheno_path.exists():
         raise SystemExit(f"Unified phenotype file not found: {unified_pheno_path}")
 
@@ -97,9 +94,8 @@ def main():
         print(f"✓ Loaded phenotype: {pheno.shape[0]} rows, "
               f"{pheno['germplasmName_mapped'].nunique()} unique mapped lines")
 
-    # ---------------------------------------------------------
+
     # Load genotype (trial-specific, used only for prediction)
-    # ---------------------------------------------------------
     geno_numeric_path = trial_proc_dir / "geno_numeric.npy"
     geno_lines_path = trial_proc_dir / "geno_lines.npy"
 
@@ -113,9 +109,8 @@ def main():
 
     print(f"✓ Loaded genotype: {len(geno_lines)} lines × {geno_numeric.shape[1]} markers")
 
-    # ---------------------------------------------------------
+
     # Load GLOBAL GRM + sample list
-    # ---------------------------------------------------------
     grm_dir = Path(paths["global_grm_root"])
     global_grm_path = grm_dir / "GRM_global_union.npy"
     global_samples_path = grm_dir / "G_global_union_samples.txt"
@@ -131,9 +126,8 @@ def main():
 
     print(f"✓ Loaded GLOBAL GRM: {G.shape}")
 
-    # ---------------------------------------------------------
+
     # Save GRM + GRM lines for CV0/CV00
-    # ---------------------------------------------------------
     out_grm_path = outdir / "GRM.npy"
     np.save(out_grm_path, G)
 
@@ -145,9 +139,8 @@ def main():
     print(f"✓ Saved GLOBAL GRM → {out_grm_path}")
     print(f"✓ Saved GLOBAL GRM lines → {out_lines_path}")
 
-    # ---------------------------------------------------------
+
     # Fit model (using GLOBAL samples, not trial samples)
-    # ---------------------------------------------------------
     print("\nFitting model...")
 
     model = fit_model(
@@ -158,9 +151,8 @@ def main():
         model_type="gblup"
     )
 
-    # ---------------------------------------------------------
+
     # Save model
-    # ---------------------------------------------------------
     model_path = outdir / "final_model.joblib"
     joblib.dump(model, model_path)
 

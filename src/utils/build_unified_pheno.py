@@ -4,29 +4,25 @@ import os
 import pandas as pd
 import numpy as np
 
-# ---------------------------------------------------------
+
 # Resolve repo root
-# ---------------------------------------------------------
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-# ---------------------------------------------------------
+
 # Input locations
-# ---------------------------------------------------------
 HIST_PHENO = f"{REPO_ROOT}/data/raw/pheno_processed.csv"
 PREDICTATHON_DIR = f"{REPO_ROOT}/data/predictathon"
 
-# ---------------------------------------------------------
+
 # Output locations
-# ---------------------------------------------------------
 OUTDIR = f"{REPO_ROOT}/data/processed"
 os.makedirs(OUTDIR, exist_ok=True)
 
 OUTFILE = f"{OUTDIR}/unified_training_pheno_cleaned.csv"
 TRIAL_STATS_OUT = f"{OUTDIR}/trial_yield_stats_raw.csv"
 
-# ---------------------------------------------------------
+
 # Load historical phenotype
-# ---------------------------------------------------------
 print("[unified_pheno] Loading historical phenotype...")
 
 hist = pd.read_csv(
@@ -37,9 +33,8 @@ hist = pd.read_csv(
     on_bad_lines="skip"
 )
 
-# ---------------------------------------------------------
+
 # Extract grain yield column
-# ---------------------------------------------------------
 yield_cols = [
     "Grain yield - kg/ha|CO_321:0001218",
     "Grain yield - g/plot|CO_321:0001221",
@@ -59,24 +54,21 @@ yield_col = (
 hist["value"] = pd.to_numeric(hist[yield_col], errors="coerce")
 hist = hist.dropna(subset=["value"]).copy()
 
-# ---------------------------------------------------------
+
 # Build trial column
-# ---------------------------------------------------------
 if "studyName" not in hist.columns:
     raise SystemExit("Historical phenotype missing 'studyName' column.")
 hist["trial"] = hist["studyName"]
 
-# ---------------------------------------------------------
+
 # Ensure germplasm mapping column exists
-# ---------------------------------------------------------
 if "germplasmName_mapped" not in hist.columns:
     hist["germplasmName_mapped"] = hist["germplasmName"]
 
 hist = hist[["germplasmName", "germplasmName_mapped", "value", "trial"]]
 
-# ---------------------------------------------------------
+
 # Load Predictathon training phenotypes
-# ---------------------------------------------------------
 print("[unified_pheno] Loading Predictathon training phenotypes...")
 
 predictathon_frames = []
@@ -122,21 +114,18 @@ if not predictathon_frames:
 pred = pd.concat(predictathon_frames, ignore_index=True)
 pred = pred[["germplasmName", "germplasmName_mapped", "value", "trial"]]
 
-# ---------------------------------------------------------
+
 # Combine historical + Predictathon
-# ---------------------------------------------------------
 print("[unified_pheno] Combining historical + Predictathon phenotypes...")
 full = pd.concat([hist, pred], ignore_index=True)
 
-# ---------------------------------------------------------
+
 # Drop missing or zero values
-# ---------------------------------------------------------
 full = full.dropna(subset=["value"])
 full = full[full["value"] != 0]
 
-# ---------------------------------------------------------
+
 # Save raw per‑trial mean and std BEFORE normalization
-# ---------------------------------------------------------
 trial_stats = (
     full.groupby("trial")["value"]
         .agg(raw_mean="mean", raw_std="std")
@@ -146,9 +135,8 @@ trial_stats = (
 trial_stats.to_csv(TRIAL_STATS_OUT, index=False)
 print(f"[unified_pheno] Wrote trial stats → {TRIAL_STATS_OUT}")
 
-# ---------------------------------------------------------
+
 # Normalize phenotype within each trial (z‑score)
-# ---------------------------------------------------------
 def normalize(x):
     if x.std(ddof=0) == 0:
         return np.zeros(len(x))
@@ -156,14 +144,12 @@ def normalize(x):
 
 full["value"] = full.groupby("trial")["value"].transform(normalize)
 
-# ---------------------------------------------------------
+
 # Build unified ID column for GRM matching
-# ---------------------------------------------------------
 full["id_for_grm"] = full["germplasmName_mapped"].fillna(full["germplasmName"])
 
-# ---------------------------------------------------------
+
 # Save output
-# ---------------------------------------------------------
 full.to_csv(OUTFILE, index=False)
 
 print(f"[unified_pheno] Wrote → {OUTFILE}")

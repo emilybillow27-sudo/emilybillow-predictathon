@@ -8,9 +8,8 @@ out_path = "data/processed/historical_env_metadata_completed.csv"
 
 df = pd.read_csv(in_path)
 
-# -----------------------------
+
 # 1. Curated lat/lon lookup table
-# -----------------------------
 latlon = {
     "Stillwater, OK": (36.1156, -97.0584),
     "Brookings, SD": (44.3114, -96.7983),
@@ -52,9 +51,8 @@ latlon = {
     "Urbana, IL": (40.1106, -88.2073),
 }
 
-# -----------------------------
+
 # 2. Classify winter vs spring wheat
-# -----------------------------
 def classify_crop(studyName, locationName):
     name = studyName.upper()
 
@@ -70,9 +68,8 @@ def classify_crop(studyName, locationName):
 
     return "winter"
 
-# -----------------------------
+
 # 3. Extract study year (with 2-digit → 20XX rule)
-# -----------------------------
 def extract_year(studyName):
     # First try 4-digit year
     m4 = re.search(r"(\d{4})", studyName)
@@ -88,9 +85,8 @@ def extract_year(studyName):
 
 df["study_year"] = df["studyName"].apply(extract_year)
 
-# -----------------------------
+
 # 4. Infer planting/harvest dates
-# -----------------------------
 def infer_dates(row):
     year = row["study_year"]
     if year is None:
@@ -106,14 +102,12 @@ def infer_dates(row):
 df["crop_type"] = df.apply(lambda r: classify_crop(r["studyName"], r["locationName"]), axis=1)
 df[["plantingDate", "harvestDate"]] = df.apply(lambda r: pd.Series(infer_dates(r)), axis=1)
 
-# -----------------------------
+
 # 5. Assign lat/lon
-# -----------------------------
 df["latitude"] = df["locationName"].apply(lambda x: latlon.get(x, (None, None))[0])
 df["longitude"] = df["locationName"].apply(lambda x: latlon.get(x, (None, None))[1])
 
-# -----------------------------
+
 # 6. Save
-# -----------------------------
 df.to_csv(out_path, index=False)
 print(f"✓ Wrote {out_path} with {len(df)} rows.")

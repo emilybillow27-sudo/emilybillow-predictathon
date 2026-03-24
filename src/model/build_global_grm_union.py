@@ -84,9 +84,8 @@ def main():
     trial_dirs = [d for d in predictathon_dir.iterdir() if d.is_dir()]
     print(f"Found {len(trial_dirs)} trials for global GRM construction.")
 
-    # ---------------------------------------------------------
+  
     # Step 1 — Load all genotype matrices + SNP lists
-    # ---------------------------------------------------------
     all_G = []
     all_snps = []
     all_lines = []
@@ -100,34 +99,29 @@ def main():
         lines = np.load(tdir / "processed" / "geno_lines.npy", allow_pickle=True).tolist()
         all_lines.extend(lines)
 
-    # ---------------------------------------------------------
+
     # Step 2 — Build global union SNP list
-    # ---------------------------------------------------------
     union_snps = sorted(set().union(*all_snps))
     print(f"Global union SNP count: {len(union_snps)}")
 
-    # ---------------------------------------------------------
+
     # Step 3 — Align each trial to the union SNP list
-    # ---------------------------------------------------------
     aligned_mats = []
     for G, snps in zip(all_G, all_snps):
         aligned = align_to_union(G, snps, union_snps)
         aligned_mats.append(aligned)
 
-    # ---------------------------------------------------------
+ 
     # Step 4 — Stack into global genotype matrix
-    # ---------------------------------------------------------
     G_global = np.vstack(aligned_mats)
 
-    # ---------------------------------------------------------
+  
     # Step 5 — Compute global GRM
-    # ---------------------------------------------------------
     print("Computing global GRM...")
     GRM = compute_vanraden_grm(G_global)
 
-    # ---------------------------------------------------------
+
     # Step 6 — Save outputs
-    # ---------------------------------------------------------
     outdir = repo / "data" / "processed" / "global_union"
     outdir.mkdir(parents=True, exist_ok=True)
 

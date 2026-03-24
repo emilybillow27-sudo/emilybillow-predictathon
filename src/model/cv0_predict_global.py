@@ -3,9 +3,8 @@
 import sys
 from pathlib import Path
 
-# ---------------------------------------------------------
+
 # Add repo root to PYTHONPATH BEFORE importing src.*
-# ---------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
@@ -38,16 +37,14 @@ def main():
 
     repo = Path(__file__).resolve().parents[2]
 
-    # ---------------------------------------------------------
+
     # Load phenotype (historical, unmasked for CV0)
-    # ---------------------------------------------------------
     pheno_path = Path(config["phenotypes"]["unified_training"])
     pheno = pd.read_csv(pheno_path)
     pheno["germplasmName_mapped_norm"] = pheno["germplasmName_mapped"].apply(normalize)
 
-    # ---------------------------------------------------------
+
     # Load global GRM + samples
-    # ---------------------------------------------------------
     grm_dir = Path(config["paths"]["global_grm_root"])
     GRM = np.load(grm_dir / "GRM_global_union.npy")
 
@@ -55,17 +52,15 @@ def main():
         global_samples_raw = [x.strip() for x in f]
     global_samples = [normalize(x) for x in global_samples_raw]
 
-    # ---------------------------------------------------------
+
     # Load full accession list for this trial
-    # ---------------------------------------------------------
     acc_path = repo / "data" / "raw" / "accession_lists" / f"{trial}.txt"
     with open(acc_path) as f:
         acc_raw = [x.strip() for x in f]
     acc_norm = [normalize(x) for x in acc_raw]
 
-    # ---------------------------------------------------------
+
     # Build phenotype vector aligned to global samples (no masking)
-    # ---------------------------------------------------------
     pheno_map = (
         pheno.groupby("germplasmName_mapped_norm")["value"]
         .mean()
@@ -85,18 +80,16 @@ def main():
     y = np.array(y)
     mask = np.array(mask)
 
-    # ---------------------------------------------------------
+
     # Fit model on all available phenotypes
-    # ---------------------------------------------------------
     GRM_train = GRM[np.ix_(mask, mask)]
     y_train = y[mask]
     model = gblup_fit(GRM_train, y_train)
 
-    # ---------------------------------------------------------
+
     # Predict for ALL accessions in the list
     #   - genotyped: use GRM
     #   - non-genotyped: use model.mu
-    # ---------------------------------------------------------
     genotyped = [a for a in acc_norm if a in global_samples]
     missing = [a for a in acc_norm if a not in global_samples]
 

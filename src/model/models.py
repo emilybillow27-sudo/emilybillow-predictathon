@@ -5,9 +5,8 @@ import sys
 import numpy as np
 import pandas as pd
 
-# =========================================================
+
 # GRM builder (VanRaden-like)
-# =========================================================
 
 def build_grm_from_geno(geno_numeric):
     """Build a VanRaden-like GRM from a genotype dosage matrix."""
@@ -41,9 +40,8 @@ def build_grm_from_geno(geno_numeric):
     return (X_centered @ X_centered.T) / m
 
 
-# =========================================================
-# LEGACY GBLUP MODEL (u_hat path)
-# =========================================================
+
+# Legacy GBLUP MODEL (u_hat path)
 
 class LegacyGBLUPModel:
     """Legacy GBLUP container used by fit_model() and predict_for_trial()."""
@@ -57,9 +55,8 @@ class LegacyGBLUPModel:
         return self.u_hat
 
 
-# =========================================================
-# LEGACY GBLUP SOLVER (used by train_model.py)
-# =========================================================
+
+# Legacy GBLUP solver (used by train_model.py)
 
 def fit_model(train_pheno, geno_numeric, geno_lines, G, model_type="gblup"):
     """
@@ -96,9 +93,8 @@ def fit_model(train_pheno, geno_numeric, geno_lines, G, model_type="gblup"):
     return LegacyGBLUPModel(u_hat=u_hat, lines=geno_lines)
 
 
-# =========================================================
-# LEGACY PREDICTION (used by train_model pipeline)
-# =========================================================
+
+# Legacy prediction (used by train_model pipeline)
 
 def predict_for_trial(model, focal_trial, test_accessions, geno_numeric, geno_lines, env, G, model_type="gblup"):
     """Return u_hat for requested accessions."""
@@ -111,9 +107,8 @@ def predict_for_trial(model, focal_trial, test_accessions, geno_numeric, geno_li
     raise TypeError("Model must be LegacyGBLUPModel for legacy prediction.")
 
 
-# =========================================================
-# SIMPLE CV (unchanged)
-# =========================================================
+
+# Simple CV
 
 def cross_validate_model(train_pheno, geno_numeric, geno_lines, env, G, model_type="gblup", n_folds=5):
     if "germplasmName" not in train_pheno.columns or "value" not in train_pheno.columns:
@@ -145,9 +140,8 @@ def cross_validate_model(train_pheno, geno_numeric, geno_lines, env, G, model_ty
     return pd.concat(results, ignore_index=True)
 
 
-# =========================================================
-# NEW GLOBAL-GRM GBLUP (mu, alpha) for CV0/CV00
-# =========================================================
+
+# GLOBAL-GRM GBLUP (mu, alpha) for CV0/CV00
 
 class GBLUPModel:
     """New global-GRM GBLUP model."""
@@ -172,9 +166,8 @@ def gblup_predict(model, K_pred):
     return model.mu + K_pred @ model.alpha
 
 
-# =========================================================
+
 # CLI: build GRM for a trial
-# =========================================================
 
 def _cli_build_grm(trial):
     ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
