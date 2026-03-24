@@ -109,9 +109,10 @@ Each folder contains:
 - Predictions
 - Accessions used
 - Trials used for training
-- Fully compliant with Predictathon requirements.
 
 ## Contact
 Emily Billow
 Graduate Research Assistant
 Soil & Crop Sciences, Colorado State University
+
+Emily.Billow@colostate.edu
