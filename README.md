@@ -74,7 +74,7 @@ Large genotype files are not stored in GitHub and must be downloaded manually.
 These files are typically hundreds of MB to several GB and must remain local.
 
 4. Metadata / Mapping Files
-- missing_pnw_studies.txt: Used for phenotype harmonization
+- Metadata files for each predictathon trial downloaded from T3/Wheat
 - Any accession‑mapping tables: Required for phenotype/genotype alignment
 
 ## Running the Pipeline
