@@ -1,73 +1,51 @@
-###############################################
-# OS / Editor junk
-###############################################
+# Os and editor junk
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
 
-###############################################
 # Python cache
-###############################################
 __pycache__/
 *.pyc
 *.pyo
 
-###############################################
 # Jupyter
-###############################################
 .ipynb_checkpoints/
 
-###############################################
 # Snakemake internals
-###############################################
 .snakemake/
 *.snakemake_timestamp
 
-###############################################
-# Logs / temp files
-###############################################
+# Logs and temp files
 *.log
 *.tmp
 *.bak
 
-###############################################
-# Model artifacts (generated)
-###############################################
+# Model artifacts
 trained_models/*/
 !trained_models/.gitkeep
 
-###############################################
-# Results (generated predictions)
-###############################################
+# Results
 results/*/
 !results/.gitkeep
 
-###############################################
-# Predictathon submission outputs (generated)
-###############################################
+# Submission outputs
 submission/*/
 !submission/.gitkeep
 
-###############################################
-# Processed data (generated)
-###############################################
+# Processed data
 data/processed/*/
 !data/processed/.gitkeep
 
-# Allow global GRM folder to be tracked if needed
+# Allow global grm folder
 !data/processed/global/
 !data/processed/global/*.txt
 
-###############################################
-# Filtered VCFs (generated)
-###############################################
+# Filtered vcfs
 data/predictathon/*/genotypes/*_filtered.vcf.gz
 data/predictathon/*/genotypes/*_filtered.vcf.gz.tbi
 
-###############################################
-# Large intermediate genotype matrices (old pipeline)
-###############################################
+# Old intermediate genotype matrices
 data/predictathon/*/processed/geno_*.npy
 data/predictathon/*/processed/geno_*.csv
 data/predictathon/*/processed/GRM.npy
