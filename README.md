@@ -25,17 +25,17 @@ All genotype and phenotype inputs originate from T3/Wheat and must be downloaded
 ## Repository Structure
 ```
 data/
-  raw/                     # Raw VCFs, raw phenotypes, metadata (local only)
-  processed/               # Unified phenotypes, mapped IDs
-  predictathon/            # Per-trial genotype + phenotype folders
+  raw/                     # Accession lists and global yield stats
+  processed/               # Unified phenotypes and mapped ids
+  predictathon/            # Per-trial genotype and phenotype folders
 
 src/
-  genotypes/               # VCF preprocessing, GRM construction
-  model/                   # Training, CV0, CV00, expected accuracy
+  genotypes/               # Vcf preprocessing and grm construction
+  model/                   # Training, cv0, cv00, expected accuracy
   utils/                   # Shared helpers
 
-trained_models/            # Saved GRMs and trained models
-results/                   # CV0, CV00, and EA outputs
+trained_models/            # Saved grms and trained models
+results/                   # Cv0, cv00, and expected accuracy outputs
 submission/                # Predictathon-compliant final submission
 
 config.yaml                # Trial, trait, and model settings
